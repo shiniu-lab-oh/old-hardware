@@ -11,15 +11,124 @@ capabilities:
   display:
     type: seven_segment
     digits: 3
+    model: "SM310361K-0"
+    common: common_anode
+    decimal_point: true
+    digit_select:
+      signals:
+        - D1
+        - D2
+        - D3
+      active: low
+    segment_driver:
+      type: 74HC164
+      segment_active: low
+      q_mapping:
+        Q0: decimal_point
+        Q1: D
+        Q2: E
+        Q3: A
+        Q4: C
+        Q5: G
+        Q6: F
+        Q7: B
 
   leds:
     count: 2
-    colors:
-      - red
-      - green
+    items:
+      - index: 0
+        color: red
+        controllable: false
+        connection: hard_wired_power
+      - index: 1
+        color: green
+        controllable: true
+        signal: LOCK
+        active: high
 
   keys:
     count: 6
+    mapping:
+      - id: 1
+        sdk_key: OLD_PANEL_KEY_1
+        original_label: MENU
+        q_output: Q2
+      - id: 2
+        sdk_key: OLD_PANEL_KEY_2
+        original_label: CH-
+        q_output: Q4
+      - id: 3
+        sdk_key: OLD_PANEL_KEY_3
+        original_label: CH+
+        q_output: Q7
+      - id: 4
+        sdk_key: OLD_PANEL_KEY_4
+        original_label: VOL-
+        q_output: Q6
+      - id: 5
+        sdk_key: OLD_PANEL_KEY_5
+        original_label: VOL+
+        q_output: Q1
+      - id: 6
+        sdk_key: OLD_PANEL_KEY_6
+        original_label: OK
+        q_output: Q3
+
+  infrared:
+    present: true
+    supported: false
+
+  card_slot:
+    present: true
+    supported: false
+
+interface:
+  signals:
+    - name: D1
+      esp32_gpio: 25
+      direction: output
+      header_label: "A18 / DAC1"
+    - name: D2
+      esp32_gpio: 26
+      direction: output
+      header_label: "A19 / DAC2"
+    - name: D3
+      esp32_gpio: 32
+      direction: output
+      header_label: "A4"
+    - name: D4
+      esp32_gpio: 33
+      direction: output
+      header_label: "A5"
+      notes: "Auxiliary indicator bank select"
+    - name: CLK
+      esp32_gpio: 22
+      direction: output
+      header_label: "SCL"
+    - name: DATA
+      esp32_gpio: 21
+      direction: output
+      header_label: "SDA"
+    - name: LOCK
+      esp32_gpio: 19
+      direction: output
+      header_label: "MISO"
+      notes: "Green LED control"
+    - name: K0
+      esp32_gpio: 34
+      direction: input
+      header_label: "A6"
+      notes: "Input only; uses panel bias components"
+    - name: IR
+      esp32_gpio: 35
+      direction: input
+      header_label: "A7"
+      notes: "Input only; SDK v0.1 does not expose IR"
+    - name: VCC
+      voltage: 3.3V
+      direction: power
+    - name: GND
+      direction: ground
 
 controller:
   platform: ESP32
@@ -28,6 +137,11 @@ software:
   framework: ESP-IDF
   sdk: Old Panel SDK
   driver: lp001
+
+driver:
+  name: lp001
+  sdk: old-panel
+  status: development
 
 status:
   reverse_engineered: true
@@ -38,4 +152,5 @@ status:
   production_ready: false
 
 notes:
-  - "工作电压、完整 Pinout 和驱动芯片信息待进一步整理确认。"
+  - "Pinout 和 GPIO 编号来自原始 front_panel.c 实验代码，仍需要在正式硬件文档中复核。"
+  - "IR 硬件存在，但当前 SDK v0.1 暂不纳入公共 API。"
