@@ -1,0 +1,41 @@
+id: LP-001
+
+category: set_top_box_front_panel
+
+original_hardware:
+  brand: "欧视达"
+  model: "ABS-209B"
+  type: "digital_tv_set_top_box"
+
+capabilities:
+  display:
+    type: seven_segment
+    digits: 3
+
+  leds:
+    count: 2
+    colors:
+      - red
+      - green
+
+  keys:
+    count: 6
+
+controller:
+  platform: ESP32
+
+software:
+  framework: ESP-IDF
+  sdk: Old Panel SDK
+  driver: lp001
+
+status:
+  reverse_engineered: true
+  display_verified: true
+  leds_verified: true
+  keys_verified: true
+  sdk_integrated: false
+  production_ready: false
+
+notes:
+  - "工作电压、完整 Pinout 和驱动芯片信息待进一步整理确认。"
