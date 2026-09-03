@@ -28,7 +28,8 @@ LP-001 已经可以脱离原机主板，由 ESP32 独立控制前面板。
 - LED 控制
 - 实体按键读取
 
-下一步将把现有控制代码重构为 Old Panel SDK 的第一个设备驱动。
+现有控制代码已经重构为 Old Panel SDK 的第一个注册驱动，并通过
+`hello-panel` 与 `factory-test` 在真实硬件上验证。
 
 ## 项目中的角色
 
@@ -44,6 +45,6 @@ LP-001 不是 Panel Box 的产品型号。
 
 ## 状态
 
-**Driver:** Development  
-**SDK Support:** In Progress  
-**Production Ready:** No
+- Driver: Development
+- SDK Support: Integrated
+- Production Ready: No

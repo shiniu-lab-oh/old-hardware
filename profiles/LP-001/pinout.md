@@ -2,7 +2,7 @@
 
 ## Status
 
-第一版已根据原始 `front_panel.c` 实验代码整理。
+第一版根据原始 `front_panel.c` 实验代码整理，并已在通用 30Pin ESP32 开发板上验证。
 
 LP-001 已经成功连接 ESP32 并实现显示、LED 和按键控制。
 
@@ -20,7 +20,7 @@ LP-001 已经成功连接 ESP32 并实现显示、LED 和按键控制。
 | TODO | DATA | Output | 3.3V logic | GPIO21 | 74HC164 serial data |
 | TODO | LOCK | Output | 3.3V logic | GPIO19 | Green LED control, active high |
 | TODO | K0 | Input | 3.3V logic | GPIO34 | Key scan input; ESP32 input-only GPIO |
-| TODO | IR | Input | 3.3V logic | GPIO35 | IR receiver input; SDK v0.1 disabled |
+| TODO | IR | Input | 3.3V logic | GPIO35 | IR receiver input; not exposed by the SDK |
 | TODO | VCC | Power | 3.3V | 3V3 | Panel supply |
 | TODO | GND | Ground | 0V | GND | Common ground |
 

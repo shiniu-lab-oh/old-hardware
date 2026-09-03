@@ -1,7 +1,6 @@
 #include "drivers/lp001.h"
 
 #include <stddef.h>
-#include <string.h>
 
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
@@ -14,20 +13,18 @@
 static const char *TAG = "[LP001]";
 
 /*
- * Old set-top-box panel connector (J1), ESP32-L wiring:
+ * Reference wiring for the old set-top-box panel connector (J1):
  *
- *   J1 signal  ESP32 GPIO  ESP32-L header label
- *   D1         25          A18 / DAC1
- *   D2         26          A19 / DAC2
- *   D3         32          A4
- *   D4         33          A5
- *   CLK        22          SCL
- *   DATA       21          SDA
- *   LOCK       19          MISO
- *   K0         34          A6 (input only)
- *   IR         35          A7 (input only)
- *   3.3V       3V3
- *   GND        GND
+ *   J1 signal  ESP32 GPIO
+ *   D1         25
+ *   D2         26
+ *   D3         32
+ *   D4         33
+ *   CLK        22
+ *   DATA       21
+ *   LOCK       19
+ *   K0         34 (input only)
+ *   IR         35 (input only)
  */
 #define LP001_PIN_D1 GPIO_NUM_25
 #define LP001_PIN_D2 GPIO_NUM_26
@@ -79,6 +76,7 @@ static const char *TAG = "[LP001]";
 #define LP001_BLINK_MIN_INTERVAL_MS 100
 #define LP001_KEY_EVENT_QUEUE_LENGTH 12
 #define LP001_LED_GREEN 0
+#define LP001_LED_COUNT 1
 
 typedef enum {
     LP001_KEY_NONE = -1,
@@ -89,15 +87,6 @@ typedef enum {
     LP001_KEY_VOLUME_UP,
     LP001_KEY_OK,
 } lp001_key_t;
-
-static const old_panel_caps_t s_lp001_caps = {
-    .digits = 3,
-    .keys = 6,
-    .leds = 1,
-    .has_decimal_point = true,
-    .has_ir = true,
-    .has_card_slot = true,
-};
 
 /*
  * Solved from the independent-digit F0/CC/AA photograph plus the hand-drawn
@@ -156,6 +145,17 @@ static int s_probe_score;
 
 static void display_value_internal(int value, bool leading_zeroes,
                                    uint8_t decimal_points);
+static esp_err_t lp001_init(void);
+static esp_err_t lp001_display_value(int value,
+                                     bool leading_zeroes,
+                                     uint8_t decimal_points);
+static esp_err_t lp001_display_blank(void);
+static esp_err_t lp001_set_brightness(uint8_t percent);
+static esp_err_t lp001_set_blink(bool enabled, uint32_t interval_ms);
+static esp_err_t lp001_set_led(uint8_t index, bool on);
+static old_panel_key_t lp001_get_key(void);
+static bool lp001_wait_key_event(old_panel_key_event_t *event,
+                                 TickType_t wait_ticks);
 
 static old_panel_key_t lp001_key_to_old_panel_key(lp001_key_t key)
 {
@@ -343,11 +343,12 @@ static void update_debounced_key(uint8_t raw_mask)
                  s_probe_score);
         publish_key_event(new_key, true);
 #if LP001_KEY_TEST_DISPLAY
-        lp001_display_number((int)lp001_key_to_old_panel_key(new_key) + 1);
+        lp001_display_value(
+            (int)lp001_key_to_old_panel_key(new_key) + 1, false, 0);
 #endif
     } else if (new_key == LP001_KEY_NONE && old_key != LP001_KEY_NONE) {
 #if LP001_KEY_TEST_DISPLAY
-        lp001_display_number(0);
+        lp001_display_value(0, false, 0);
 #endif
     }
 }
@@ -448,7 +449,7 @@ static uint8_t scan_key_outputs_adc(void)
     return (uint8_t)(1U << best_key);
 }
 
-static void lp001_hardware_init(void)
+static esp_err_t lp001_hardware_init(void)
 {
     const uint64_t output_mask =
         (1ULL << LP001_PIN_D1) | (1ULL << LP001_PIN_D2) |
@@ -462,7 +463,10 @@ static void lp001_hardware_init(void)
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
-    ESP_ERROR_CHECK(gpio_config(&output_config));
+    esp_err_t err = gpio_config(&output_config);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     gpio_config_t input_config = {
         .pin_bit_mask = (1ULL << LP001_PIN_K0) | (1ULL << LP001_PIN_IR),
@@ -471,19 +475,30 @@ static void lp001_hardware_init(void)
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
         .intr_type = GPIO_INTR_DISABLE,
     };
-    ESP_ERROR_CHECK(gpio_config(&input_config));
+    err = gpio_config(&input_config);
+    if (err != ESP_OK) {
+        return err;
+    }
 
     adc_oneshot_unit_init_cfg_t adc_unit_config = {
         .unit_id = ADC_UNIT_1,
         .ulp_mode = ADC_ULP_MODE_DISABLE,
     };
-    ESP_ERROR_CHECK(adc_oneshot_new_unit(&adc_unit_config, &s_kd_adc_handle));
+    err = adc_oneshot_new_unit(&adc_unit_config, &s_kd_adc_handle);
+    if (err != ESP_OK) {
+        return err;
+    }
     adc_oneshot_chan_cfg_t adc_channel_config = {
         .atten = ADC_ATTEN_DB_12,
         .bitwidth = ADC_BITWIDTH_DEFAULT,
     };
-    ESP_ERROR_CHECK(adc_oneshot_config_channel(
-        s_kd_adc_handle, ADC_CHANNEL_6, &adc_channel_config));
+    err = adc_oneshot_config_channel(
+        s_kd_adc_handle, ADC_CHANNEL_6, &adc_channel_config);
+    if (err != ESP_OK) {
+        adc_oneshot_del_unit(s_kd_adc_handle);
+        s_kd_adc_handle = NULL;
+        return err;
+    }
 
 #if LP001_IR_ENABLED
     /*
@@ -497,7 +512,7 @@ static void lp001_hardware_init(void)
     all_digits_off();
     gpio_set_level(LP001_PIN_CLK, 0);
     gpio_set_level(LP001_PIN_DATA, 0);
-    gpio_set_level(LP001_PIN_LOCK, LP001_GREEN_LED_ON_LEVEL);
+    gpio_set_level(LP001_PIN_LOCK, !LP001_GREEN_LED_ON_LEVEL);
     shift_register_write(0x00);
 
     ESP_LOGI(TAG,
@@ -505,12 +520,12 @@ static void lp001_hardware_init(void)
              LP001_PIN_D1, LP001_PIN_D2, LP001_PIN_D3, LP001_PIN_D4,
              LP001_PIN_CLK, LP001_PIN_DATA, LP001_PIN_LOCK, LP001_PIN_K0,
              LP001_PIN_IR);
+
+    return ESP_OK;
 }
 
-static void lp001_task(void *arg)
+static void lp001_prepare_initial_display(void)
 {
-    (void)arg;
-    lp001_hardware_init();
 #if LP001_SEGMENT_CALIBRATION
     portENTER_CRITICAL(&s_state_lock);
     s_display_segments[0] = 0xF0;
@@ -521,14 +536,19 @@ static void lp001_task(void *arg)
     ESP_LOGI(TAG, "segment calibration pattern: left=F0 middle=CC right=AA");
 #else
 #if LP001_KEY_TEST_DISPLAY
-    lp001_display_number(0);
+    display_value_internal(0, false, 0);
 #else
-    lp001_display_number_padded(0);
+    display_value_internal(0, true, 0);
 #endif
     portENTER_CRITICAL(&s_state_lock);
     s_display_segments[3] = 0x00;
     portEXIT_CRITICAL(&s_state_lock);
 #endif
+}
+
+static void lp001_task(void *arg)
+{
+    (void)arg;
 
     TickType_t last_key_scan = xTaskGetTickCount();
 #if LP001_DECIMAL_POINT_CALIBRATION
@@ -550,7 +570,7 @@ static void lp001_task(void *arg)
 #if LP001_LOCK_CALIBRATION
     TickType_t lock_phase_start = last_key_scan;
     bool lock_high = true;
-    lp001_display_number(111);
+    lp001_display_value(111, false, 0);
     portENTER_CRITICAL(&s_state_lock);
     s_display_segments[3] = 0x00;
     portEXIT_CRITICAL(&s_state_lock);
@@ -560,7 +580,7 @@ static void lp001_task(void *arg)
     TickType_t indicator_phase_start = last_key_scan;
     int indicator_q = 0;
     bool indicator_on = true;
-    lp001_display_number(1);
+    lp001_display_value(1, false, 0);
     portENTER_CRITICAL(&s_state_lock);
     s_display_segments[3] = 1U << indicator_q;
     portEXIT_CRITICAL(&s_state_lock);
@@ -645,7 +665,7 @@ static void lp001_task(void *arg)
                     ESP_LOGI(TAG, "display demo: 7 (leading zeroes blanked)");
                     break;
                 case 1:
-                    lp001_display_number_padded(7);
+                    lp001_display_value(7, true, 0);
                     ESP_LOGI(TAG, "display demo: 007 (leading zeroes shown)");
                     break;
                 case 2:
@@ -653,12 +673,12 @@ static void lp001_task(void *arg)
                     ESP_LOGI(TAG, "display demo: 12.3 (middle decimal point)");
                     break;
                 case 3:
-                    lp001_display_number_padded(888);
+                    lp001_display_value(888, true, 0);
                     lp001_set_brightness(25);
                     ESP_LOGI(TAG, "display demo: 888 at 25%% brightness");
                     break;
                 default:
-                    lp001_display_number_padded(456);
+                    lp001_display_value(456, true, 0);
                     lp001_set_blink(true, 400);
                     ESP_LOGI(TAG, "display demo: blinking 456");
                     break;
@@ -688,7 +708,7 @@ static void lp001_task(void *arg)
             } else {
                 indicator_q = (indicator_q + 1) % 8;
                 indicator_on = true;
-                lp001_display_number(indicator_q + 1);
+                lp001_display_value(indicator_q + 1, false, 0);
                 portENTER_CRITICAL(&s_state_lock);
                 s_display_segments[3] = (uint8_t)(1U << indicator_q);
                 portEXIT_CRITICAL(&s_state_lock);
@@ -730,7 +750,7 @@ static void lp001_task(void *arg)
     }
 }
 
-esp_err_t lp001_init(void)
+static esp_err_t lp001_init(void)
 {
     if (s_scan_task_handle != NULL) {
         return ESP_OK;
@@ -745,10 +765,24 @@ esp_err_t lp001_init(void)
         }
     }
 
+    esp_err_t err = lp001_hardware_init();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "hardware initialization failed: %s", esp_err_to_name(err));
+        vQueueDelete(s_key_event_queue);
+        s_key_event_queue = NULL;
+        return err;
+    }
+
+    lp001_prepare_initial_display();
+
     const BaseType_t result = xTaskCreate(
         lp001_task, "lp001_panel", 3072, NULL, 6, &s_scan_task_handle);
     if (result != pdPASS) {
         s_scan_task_handle = NULL;
+        adc_oneshot_del_unit(s_kd_adc_handle);
+        s_kd_adc_handle = NULL;
+        vQueueDelete(s_key_event_queue);
+        s_key_event_queue = NULL;
         ESP_LOGE(TAG, "failed to create scan task");
         return ESP_FAIL;
     }
@@ -756,25 +790,11 @@ esp_err_t lp001_init(void)
     return ESP_OK;
 }
 
-esp_err_t lp001_get_capabilities(old_panel_caps_t *caps)
+static esp_err_t lp001_display_value(int value,
+                                     bool leading_zeroes,
+                                     uint8_t decimal_points)
 {
-    if (caps == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-
-    memcpy(caps, &s_lp001_caps, sizeof(*caps));
-    return ESP_OK;
-}
-
-esp_err_t lp001_display_number(int value)
-{
-    display_value_internal(value, false, 0);
-    return ESP_OK;
-}
-
-esp_err_t lp001_display_number_padded(int value)
-{
-    display_value_internal(value, true, 0);
+    display_value_internal(value, leading_zeroes, decimal_points);
     return ESP_OK;
 }
 
@@ -810,7 +830,7 @@ static void display_value_internal(int value, bool leading_zeroes,
     portEXIT_CRITICAL(&s_state_lock);
 }
 
-esp_err_t lp001_display_blank(void)
+static esp_err_t lp001_display_blank(void)
 {
     portENTER_CRITICAL(&s_state_lock);
     for (size_t i = 0; i < LP001_DIGIT_COUNT; ++i) {
@@ -820,7 +840,7 @@ esp_err_t lp001_display_blank(void)
     return ESP_OK;
 }
 
-esp_err_t lp001_set_brightness(uint8_t percent)
+static esp_err_t lp001_set_brightness(uint8_t percent)
 {
     if (percent > 100) {
         percent = 100;
@@ -832,7 +852,7 @@ esp_err_t lp001_set_brightness(uint8_t percent)
     return ESP_OK;
 }
 
-esp_err_t lp001_set_blink(bool enabled, uint32_t interval_ms)
+static esp_err_t lp001_set_blink(bool enabled, uint32_t interval_ms)
 {
     const TickType_t now = xTaskGetTickCount();
     if (interval_ms < LP001_BLINK_MIN_INTERVAL_MS) {
@@ -848,9 +868,9 @@ esp_err_t lp001_set_blink(bool enabled, uint32_t interval_ms)
     return ESP_OK;
 }
 
-esp_err_t lp001_set_led(uint8_t index, bool on)
+static esp_err_t lp001_set_led(uint8_t index, bool on)
 {
-    if (index >= s_lp001_caps.leds) {
+    if (index >= LP001_LED_COUNT) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -863,12 +883,12 @@ esp_err_t lp001_set_led(uint8_t index, bool on)
     return ESP_ERR_INVALID_ARG;
 }
 
-old_panel_key_t lp001_get_key(void)
+static old_panel_key_t lp001_get_key(void)
 {
     return lp001_key_to_old_panel_key(s_pressed_key);
 }
 
-bool lp001_wait_key_event(
+static bool lp001_wait_key_event(
     old_panel_key_event_t *event,
     TickType_t wait_ticks
 )
@@ -876,3 +896,23 @@ bool lp001_wait_key_event(
     return event != NULL && s_key_event_queue != NULL &&
            xQueueReceive(s_key_event_queue, event, wait_ticks) == pdPASS;
 }
+
+const old_panel_driver_t old_panel_driver_lp001 = {
+    .profile_id = "LP-001",
+    .caps = {
+        .digits = LP001_DIGIT_COUNT,
+        .keys = 6,
+        .leds = LP001_LED_COUNT,
+        .has_decimal_point = true,
+        .supports_brightness = true,
+        .supports_blink = true,
+    },
+    .init = lp001_init,
+    .display_value = lp001_display_value,
+    .display_blank = lp001_display_blank,
+    .set_brightness = lp001_set_brightness,
+    .set_blink = lp001_set_blink,
+    .set_led = lp001_set_led,
+    .get_key = lp001_get_key,
+    .wait_key_event = lp001_wait_key_event,
+};

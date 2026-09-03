@@ -8,7 +8,11 @@ static const char *TAG = "hello_panel";
 
 void app_main(void)
 {
-    ESP_ERROR_CHECK(old_panel_init());
+    const old_panel_config_t config = {
+        .profile_id = "LP-001",
+    };
+
+    ESP_ERROR_CHECK(old_panel_init(&config));
 
     old_panel_caps_t caps;
     ESP_ERROR_CHECK(old_panel_get_capabilities(&caps));

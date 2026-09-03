@@ -13,7 +13,6 @@ extern "C" {
 
 typedef enum {
     OLD_PANEL_KEY_NONE = -1,
-
     OLD_PANEL_KEY_1 = 0,
     OLD_PANEL_KEY_2,
     OLD_PANEL_KEY_3,
@@ -22,14 +21,6 @@ typedef enum {
     OLD_PANEL_KEY_6,
     OLD_PANEL_KEY_7,
     OLD_PANEL_KEY_8,
-
-    OLD_PANEL_KEY_POWER,
-    OLD_PANEL_KEY_MENU,
-    OLD_PANEL_KEY_OK,
-    OLD_PANEL_KEY_UP,
-    OLD_PANEL_KEY_DOWN,
-    OLD_PANEL_KEY_LEFT,
-    OLD_PANEL_KEY_RIGHT,
 } old_panel_key_t;
 
 typedef struct {
@@ -42,18 +33,27 @@ typedef struct {
     uint8_t keys;
     // Number of LEDs that applications can control through old_panel_set_led().
     uint8_t leds;
-
     bool has_decimal_point;
-    bool has_ir;
-    bool has_card_slot;
+    bool supports_brightness;
+    bool supports_blink;
 } old_panel_caps_t;
 
-esp_err_t old_panel_init(void);
+typedef struct {
+    const char *profile_id;
+} old_panel_config_t;
+
+esp_err_t old_panel_init(const old_panel_config_t *config);
 
 esp_err_t old_panel_get_capabilities(old_panel_caps_t *caps);
 
 esp_err_t old_panel_display_number(int value);
 esp_err_t old_panel_display_number_padded(int value);
+// Decimal-point bit 0 is the rightmost digit; higher bits move left.
+esp_err_t old_panel_display_value(
+    int value,
+    bool leading_zeroes,
+    uint8_t decimal_points
+);
 esp_err_t old_panel_display_blank(void);
 
 esp_err_t old_panel_set_brightness(uint8_t percent);

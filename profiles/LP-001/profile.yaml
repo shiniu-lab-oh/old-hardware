@@ -89,43 +89,34 @@ interface:
     - name: D1
       esp32_gpio: 25
       direction: output
-      header_label: "A18 / DAC1"
     - name: D2
       esp32_gpio: 26
       direction: output
-      header_label: "A19 / DAC2"
     - name: D3
       esp32_gpio: 32
       direction: output
-      header_label: "A4"
     - name: D4
       esp32_gpio: 33
       direction: output
-      header_label: "A5"
       notes: "Auxiliary indicator bank select"
     - name: CLK
       esp32_gpio: 22
       direction: output
-      header_label: "SCL"
     - name: DATA
       esp32_gpio: 21
       direction: output
-      header_label: "SDA"
     - name: LOCK
       esp32_gpio: 19
       direction: output
-      header_label: "MISO"
       notes: "Green LED control"
     - name: K0
       esp32_gpio: 34
       direction: input
-      header_label: "A6"
       notes: "Input only; uses panel bias components"
     - name: IR
       esp32_gpio: 35
       direction: input
-      header_label: "A7"
-      notes: "Input only; SDK v0.1 does not expose IR"
+      notes: "Input only; Old Panel SDK does not expose IR"
     - name: VCC
       voltage: 3.3V
       direction: power
@@ -154,5 +145,5 @@ status:
   production_ready: false
 
 notes:
-  - "Pinout 和 GPIO 编号来自原始 front_panel.c 实验代码，仍需要在正式硬件文档中复核。"
-  - "IR 硬件存在，但当前 SDK v0.1 暂不纳入公共 API。"
+  - "参考 GPIO 映射已在通用 30Pin ESP32 开发板上验证。"
+  - "IR 硬件存在，但当前 Old Panel SDK 不纳入公共 API。"

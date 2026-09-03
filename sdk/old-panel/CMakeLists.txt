@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/old_panel.c"
+        "src/old_panel_registry.c"
         "src/drivers/lp001.c"
     INCLUDE_DIRS
         "include"
