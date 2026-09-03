@@ -60,7 +60,7 @@ LP-001 已经成功连接 ESP32 并实现显示、LED 和按键控制。
 
 ## LEDs
 
-| SDK LED Index | Color | Control |
-| --- | --- | --- |
-| 0 | Red | Hard-wired power LED, not software-controllable |
-| 1 | Green | Controlled by `LOCK`, active high |
+| Hardware LED | SDK LED Index | Color | Control |
+| --- | --- | --- | --- |
+| Power | Not exposed | Red | Hard-wired power LED, not software-controllable |
+| LOCK | 0 | Green | Controlled by `LOCK`, active high |

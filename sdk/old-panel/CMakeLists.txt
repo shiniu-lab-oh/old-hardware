@@ -1,0 +1,12 @@
+idf_component_register(
+    SRCS
+        "src/old_panel.c"
+        "src/drivers/lp001.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_INCLUDE_DIRS
+        "src"
+    REQUIRES
+        esp_adc
+        esp_driver_gpio
+)

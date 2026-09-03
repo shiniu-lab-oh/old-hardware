@@ -78,8 +78,7 @@ static const char *TAG = "[LP001]";
 #define LP001_DECIMAL_POINT_PHASE_MS 2000
 #define LP001_BLINK_MIN_INTERVAL_MS 100
 #define LP001_KEY_EVENT_QUEUE_LENGTH 12
-#define LP001_LED_RED 0
-#define LP001_LED_GREEN 1
+#define LP001_LED_GREEN 0
 
 typedef enum {
     LP001_KEY_NONE = -1,
@@ -94,7 +93,7 @@ typedef enum {
 static const old_panel_caps_t s_lp001_caps = {
     .digits = 3,
     .keys = 6,
-    .leds = 2,
+    .leds = 1,
     .has_decimal_point = true,
     .has_ir = true,
     .has_card_slot = true,
@@ -853,10 +852,6 @@ esp_err_t lp001_set_led(uint8_t index, bool on)
 {
     if (index >= s_lp001_caps.leds) {
         return ESP_ERR_INVALID_ARG;
-    }
-
-    if (index == LP001_LED_RED) {
-        return ESP_ERR_NOT_SUPPORTED;
     }
 
     if (index == LP001_LED_GREEN) {

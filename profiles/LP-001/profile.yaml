@@ -35,12 +35,14 @@ capabilities:
 
   leds:
     count: 2
+    sdk_exposed_count: 1
     items:
       - index: 0
         color: red
         controllable: false
         connection: hard_wired_power
       - index: 1
+        sdk_index: 0
         color: green
         controllable: true
         signal: LOCK
@@ -148,7 +150,7 @@ status:
   display_verified: true
   leds_verified: true
   keys_verified: true
-  sdk_integrated: false
+  sdk_integrated: true
   production_ready: false
 
 notes:

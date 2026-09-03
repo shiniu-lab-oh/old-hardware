@@ -40,6 +40,7 @@ typedef struct {
 typedef struct {
     uint8_t digits;
     uint8_t keys;
+    // Number of LEDs that applications can control through old_panel_set_led().
     uint8_t leds;
 
     bool has_decimal_point;
@@ -58,6 +59,7 @@ esp_err_t old_panel_display_blank(void);
 esp_err_t old_panel_set_brightness(uint8_t percent);
 esp_err_t old_panel_set_blink(bool enabled, uint32_t interval_ms);
 
+// LED indices are logical and run from 0 to capabilities.leds - 1.
 esp_err_t old_panel_set_led(uint8_t index, bool on);
 
 old_panel_key_t old_panel_get_key(void);
