@@ -1,6 +1,6 @@
 id: LP-001
 
-category: set_top_box_front_panel
+category: tv_set_top_box_front_panel
 
 original_hardware:
   brand: "欧视达"
@@ -81,7 +81,7 @@ capabilities:
     supported: false
 
   card_slot:
-    present: true
+    present: false
     supported: false
 
 interface:
@@ -134,7 +134,7 @@ software:
 driver:
   name: lp001
   sdk: old-panel
-  status: development
+  status: sdk_verified
 
 status:
   reverse_engineered: true
