@@ -1,0 +1,47 @@
+menu "PB Runtime"
+
+config PB_PANEL_PROFILE
+    string "Old Panel hardware profile"
+    default "LP-001"
+
+config PB_WIFI_SSID
+    string "Wi-Fi SSID"
+    default ""
+
+config PB_WIFI_PASSWORD
+    string "Wi-Fi password"
+    default ""
+
+config PB_CLOUD_BASE_URL
+    string "PB Cloud base URL"
+    default ""
+    help
+        Origin only, without a trailing slash. Example: https://erp.example.com
+
+config PB_DEVICE_SERIAL
+    string "PB device serial number"
+    default ""
+
+config PB_DEVICE_TOKEN
+    string "PB device token"
+    default ""
+
+config PB_PRIMARY_KEY_INDEX
+    int "Physical key mapped to the primary action"
+    range 1 8
+    default 6
+    help
+        One-based physical key index. The runtime emits only the generic
+        primary action; the active PB App decides what that action means.
+
+config PB_POLL_INTERVAL_SECONDS
+    int "State polling interval in seconds"
+    range 2 3600
+    default 10
+
+config PB_HTTP_TIMEOUT_MS
+    int "HTTP request timeout in milliseconds"
+    range 1000 60000
+    default 5000
+
+endmenu
