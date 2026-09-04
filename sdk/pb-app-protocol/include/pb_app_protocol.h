@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define PB_APP_PROTOCOL_VERSION 1U
 #define PB_APP_ID_MAX_LENGTH 32
 #define PB_VIEW_MAX_LEDS 4
 

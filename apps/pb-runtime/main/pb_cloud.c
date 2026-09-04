@@ -9,6 +9,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
+#include "pb_view.h"
 
 #define PB_CLOUD_RESPONSE_CAPACITY 1536
 #define PB_CLOUD_URL_CAPACITY 256
@@ -162,6 +163,11 @@ static esp_err_t parse_state(
     const cJSON *revision_item = cJSON_GetObjectItemCaseSensitive(root, "revision");
     const cJSON *app_item = cJSON_GetObjectItemCaseSensitive(root, "app");
     const cJSON *view_item = cJSON_GetObjectItemCaseSensitive(root, "view");
+    if (!cJSON_IsObject(view_item)) {
+        cJSON_Delete(root);
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
     const cJSON *value_item = cJSON_GetObjectItemCaseSensitive(view_item, "value");
     const cJSON *brightness_item = cJSON_GetObjectItemCaseSensitive(view_item, "brightness");
     const cJSON *leds_item = cJSON_GetObjectItemCaseSensitive(view_item, "leds");
@@ -169,9 +175,10 @@ static esp_err_t parse_state(
     pb_view_t parsed;
     pb_view_default(&parsed);
     bool valid = cJSON_IsNumber(revision_item) && revision_item->valuedouble >= 0 &&
-                 cJSON_IsString(app_item) && app_item->valuestring[0] != '\0' &&
+                 cJSON_IsString(app_item) && app_item->valuestring != NULL &&
+                 app_item->valuestring[0] != '\0' &&
                  strlen(app_item->valuestring) <= PB_APP_ID_MAX_LENGTH &&
-                 cJSON_IsObject(view_item) && cJSON_IsNumber(value_item) &&
+                 cJSON_IsNumber(value_item) &&
                  cJSON_IsNumber(brightness_item) &&
                  brightness_item->valueint >= 0 && brightness_item->valueint <= 100 &&
                  cJSON_IsArray(leds_item) &&
@@ -256,6 +263,10 @@ esp_err_t pb_cloud_post_action(
     }
 
     cJSON *root = cJSON_Parse(response.data);
+    if (root == NULL) {
+        return ESP_ERR_INVALID_RESPONSE;
+    }
+
     const cJSON *ok = cJSON_GetObjectItemCaseSensitive(root, "ok");
     const cJSON *revision_item = cJSON_GetObjectItemCaseSensitive(root, "revision");
     const bool valid = cJSON_IsTrue(ok) && cJSON_IsNumber(revision_item) &&

@@ -1,3 +1,4 @@
+#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -107,13 +108,26 @@ static esp_err_t sync_view(
     pb_cloud_t *cloud,
     const old_panel_caps_t *caps,
     pb_view_t *current_view,
-    uint64_t *current_revision
+    uint64_t *current_revision,
+    bool *has_current_revision
 )
 {
     pb_app_state_t next_state;
     esp_err_t err = pb_cloud_fetch_state(cloud, &next_state);
     if (err != ESP_OK) {
         return err;
+    }
+
+    if (*has_current_revision && next_state.revision < *current_revision) {
+        ESP_LOGW(TAG,
+                 "Ignoring stale state revision=%" PRIu64 " current=%" PRIu64,
+                 next_state.revision,
+                 *current_revision);
+        return ESP_OK;
+    }
+    if (*has_current_revision && next_state.revision == *current_revision) {
+        ESP_LOGD(TAG, "State revision=%" PRIu64 " unchanged", *current_revision);
+        return ESP_OK;
     }
 
     err = pb_view_render(&next_state.view, caps);
@@ -123,6 +137,7 @@ static esp_err_t sync_view(
 
     *current_view = next_state.view;
     *current_revision = next_state.revision;
+    *has_current_revision = true;
     err = pb_view_store_last(current_view, *current_revision);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Could not store last view: %s", esp_err_to_name(err));
@@ -144,7 +159,9 @@ void app_main(void)
 
     pb_view_t current_view;
     uint64_t current_revision = 0;
-    if (pb_view_load_last(&current_view, &current_revision) != ESP_OK) {
+    bool has_current_revision =
+        pb_view_load_last(&current_view, &current_revision) == ESP_OK;
+    if (!has_current_revision) {
         pb_view_default(&current_view);
     }
     ESP_ERROR_CHECK(pb_view_render(&current_view, &caps));
@@ -176,7 +193,11 @@ void app_main(void)
         if (cloud_err == ESP_OK && wifi_connected() &&
             (next_poll == 0 || (int32_t)(now - next_poll) >= 0)) {
             const esp_err_t err = sync_view(
-                &cloud, &caps, &current_view, &current_revision);
+                &cloud,
+                &caps,
+                &current_view,
+                &current_revision,
+                &has_current_revision);
             if (err != ESP_OK) {
                 ESP_LOGW(TAG, "State sync failed; keeping last known view");
             }
@@ -202,7 +223,12 @@ void app_main(void)
         uint64_t event_revision;
         esp_err_t err = pb_cloud_post_action(&cloud, action, &event_revision);
         if (err == ESP_OK) {
-            err = sync_view(&cloud, &caps, &current_view, &current_revision);
+            err = sync_view(
+                &cloud,
+                &caps,
+                &current_view,
+                &current_revision,
+                &has_current_revision);
         }
         if (err != ESP_OK) {
             ESP_LOGW(TAG, "Action delivery failed: %s", esp_err_to_name(err));

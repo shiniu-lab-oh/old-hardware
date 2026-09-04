@@ -4,8 +4,7 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "pb_actions.h"
-#include "pb_view.h"
+#include "pb_app_protocol.h"
 
 typedef struct {
     const char *base_url;
