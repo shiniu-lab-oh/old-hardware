@@ -26,6 +26,13 @@ config PB_DEVICE_TOKEN
     string "PB device token"
     default ""
 
+config PB_SNTP_SERVER
+    string "SNTP server for event timestamps"
+    default "pool.ntp.org"
+    help
+        Event timestamps are optional until the first successful time sync.
+        The Cloud falls back to its receive time when no timestamp is available.
+
 config PB_PRIMARY_KEY_INDEX
     int "Physical key mapped to the primary action"
     range 1 8
@@ -33,6 +40,21 @@ config PB_PRIMARY_KEY_INDEX
     help
         One-based physical key index. The runtime emits only the generic
         primary action; the active PB App decides what that action means.
+
+config PB_PRIMARY_LONG_PRESS_MS
+    int "Primary long press threshold in milliseconds"
+    range 500 5000
+    default 1750
+
+config PB_BOOT_OVERLAY_MS
+    int "Boot overlay duration in milliseconds"
+    range 250 5000
+    default 800
+
+config PB_OFFLINE_OVERLAY_MS
+    int "Offline overlay duration in milliseconds"
+    range 250 5000
+    default 1500
 
 config PB_POLL_INTERVAL_SECONDS
     int "State polling interval in seconds"

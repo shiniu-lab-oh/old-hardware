@@ -4,12 +4,16 @@ idf_component_register(
         "pb_cloud.c"
         "pb_view.c"
         "pb_actions.c"
+        "pb_timer.c"
+        "pb_overlay.c"
+        "pb_event_queue.c"
     INCLUDE_DIRS "."
     REQUIRES
         old-panel
         pb-app-protocol
         esp_event
         esp_http_client
+        esp_timer
         esp_netif
         esp_wifi
         mbedtls

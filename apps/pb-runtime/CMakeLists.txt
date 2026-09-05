@@ -11,5 +11,6 @@ if(EXISTS "${CMAKE_CURRENT_LIST_DIR}/sdkconfig.secrets")
 endif()
 
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
+idf_build_set_property(MINIMAL_BUILD ON)
 
 project(pb_runtime)

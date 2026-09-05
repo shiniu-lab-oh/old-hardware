@@ -12,6 +12,8 @@ const char *pb_action_name(pb_action_t action)
     switch (action) {
         case PB_ACTION_PRIMARY:
             return "primary";
+        case PB_ACTION_PRIMARY_LONG:
+            return "primary_long";
         case PB_ACTION_NONE:
         default:
             return "none";

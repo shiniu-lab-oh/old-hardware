@@ -20,9 +20,9 @@ typedef struct {
 
 esp_err_t pb_cloud_init(pb_cloud_t *cloud, const pb_cloud_config_t *config);
 esp_err_t pb_cloud_fetch_state(pb_cloud_t *cloud, pb_app_state_t *state);
-esp_err_t pb_cloud_post_action(
+esp_err_t pb_cloud_post_event(
     pb_cloud_t *cloud,
-    pb_action_t action,
+    const pb_event_t *event,
     uint64_t *revision
 );
 

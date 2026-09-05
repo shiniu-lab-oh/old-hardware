@@ -1,5 +1,7 @@
 # PB App Protocol v1
 
+> 本文档记录已冻结的 v1 协议。新实现请使用 `pb-app-protocol-v2.md`。
+
 PB Runtime 通过本协议渲染与具体应用无关的 View，并上报与具体应用无关的
 Action。设备只把 App ID 当作不透明标识；由 PB Cloud 决定当前 App、生成
 View，并解释 Action 的业务含义。
