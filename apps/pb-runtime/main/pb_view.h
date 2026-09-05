@@ -10,7 +10,17 @@
 
 void pb_view_default(pb_view_t *view);
 esp_err_t pb_view_render(const pb_view_t *view, const old_panel_caps_t *caps);
-esp_err_t pb_view_load_last(pb_view_t *view, uint64_t *revision);
-esp_err_t pb_view_store_last(const pb_view_t *view, uint64_t revision);
+esp_err_t pb_view_load_last(
+    const char *cloud_base_url,
+    const char *device_serial,
+    pb_view_t *view,
+    uint64_t *revision
+);
+esp_err_t pb_view_store_last(
+    const char *cloud_base_url,
+    const char *device_serial,
+    const pb_view_t *view,
+    uint64_t revision
+);
 
 #endif

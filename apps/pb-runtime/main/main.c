@@ -174,7 +174,11 @@ static esp_err_t sync_view(
     *current_view = next_state.view;
     *current_revision = next_state.revision;
     *has_current_revision = true;
-    err = pb_view_store_last(current_view, *current_revision);
+    err = pb_view_store_last(
+        cloud->config.base_url,
+        cloud->config.device_serial,
+        current_view,
+        *current_revision);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Could not store last view: %s", esp_err_to_name(err));
     }
@@ -310,7 +314,11 @@ void app_main(void)
     pb_view_t current_view;
     uint64_t current_revision = 0;
     bool has_current_revision =
-        pb_view_load_last(&current_view, &current_revision) == ESP_OK;
+        pb_view_load_last(
+            CONFIG_PB_CLOUD_BASE_URL,
+            CONFIG_PB_DEVICE_SERIAL,
+            &current_view,
+            &current_revision) == ESP_OK;
     if (!has_current_revision) {
         pb_view_default(&current_view);
     }

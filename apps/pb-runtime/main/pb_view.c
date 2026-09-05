@@ -5,14 +5,36 @@
 #include "nvs.h"
 
 #define PB_VIEW_STORE_MAGIC 0x50425631U
-#define PB_VIEW_STORE_VERSION 1U
+#define PB_VIEW_STORE_VERSION 2U
+#define PB_VIEW_SOURCE_HASH_OFFSET UINT64_C(14695981039346656037)
+#define PB_VIEW_SOURCE_HASH_PRIME UINT64_C(1099511628211)
 
 typedef struct {
     uint32_t magic;
     uint32_t version;
+    uint64_t source_hash;
     uint64_t revision;
     pb_view_t view;
 } pb_view_store_t;
+
+static uint64_t source_hash(const char *cloud_base_url, const char *device_serial)
+{
+    uint64_t hash = PB_VIEW_SOURCE_HASH_OFFSET;
+    const char *parts[] = {cloud_base_url, device_serial};
+
+    for (size_t part = 0; part < sizeof(parts) / sizeof(parts[0]); ++part) {
+        for (const unsigned char *cursor = (const unsigned char *)parts[part];
+             *cursor != '\0';
+             ++cursor) {
+            hash ^= *cursor;
+            hash *= PB_VIEW_SOURCE_HASH_PRIME;
+        }
+        hash ^= 0xffU;
+        hash *= PB_VIEW_SOURCE_HASH_PRIME;
+    }
+
+    return hash;
+}
 
 void pb_view_default(pb_view_t *view)
 {
@@ -61,9 +83,16 @@ esp_err_t pb_view_render(const pb_view_t *view, const old_panel_caps_t *caps)
     return ESP_OK;
 }
 
-esp_err_t pb_view_load_last(pb_view_t *view, uint64_t *revision)
+esp_err_t pb_view_load_last(
+    const char *cloud_base_url,
+    const char *device_serial,
+    pb_view_t *view,
+    uint64_t *revision
+)
 {
-    if (view == NULL || revision == NULL) {
+    if (cloud_base_url == NULL || cloud_base_url[0] == '\0' ||
+        device_serial == NULL || device_serial[0] == '\0' ||
+        view == NULL || revision == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -83,7 +112,8 @@ esp_err_t pb_view_load_last(pb_view_t *view, uint64_t *revision)
     }
     if (size != sizeof(stored) ||
         stored.magic != PB_VIEW_STORE_MAGIC ||
-        stored.version != PB_VIEW_STORE_VERSION) {
+        stored.version != PB_VIEW_STORE_VERSION ||
+        stored.source_hash != source_hash(cloud_base_url, device_serial)) {
         return ESP_ERR_INVALID_VERSION;
     }
 
@@ -92,9 +122,15 @@ esp_err_t pb_view_load_last(pb_view_t *view, uint64_t *revision)
     return ESP_OK;
 }
 
-esp_err_t pb_view_store_last(const pb_view_t *view, uint64_t revision)
+esp_err_t pb_view_store_last(
+    const char *cloud_base_url,
+    const char *device_serial,
+    const pb_view_t *view,
+    uint64_t revision
+)
 {
-    if (view == NULL) {
+    if (cloud_base_url == NULL || cloud_base_url[0] == '\0' ||
+        device_serial == NULL || device_serial[0] == '\0' || view == NULL) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -107,6 +143,7 @@ esp_err_t pb_view_store_last(const pb_view_t *view, uint64_t revision)
     const pb_view_store_t stored = {
         .magic = PB_VIEW_STORE_MAGIC,
         .version = PB_VIEW_STORE_VERSION,
+        .source_hash = source_hash(cloud_base_url, device_serial),
         .revision = revision,
         .view = *view,
     };
