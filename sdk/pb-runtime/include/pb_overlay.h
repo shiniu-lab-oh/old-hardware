@@ -5,7 +5,6 @@
 #include <stdint.h>
 
 #include "esp_err.h"
-#include "old_panel.h"
 
 typedef struct {
     bool active;
@@ -17,8 +16,7 @@ esp_err_t pb_overlay_show_code(
     pb_overlay_t *overlay,
     int code,
     uint32_t duration_ms,
-    bool blink,
-    const old_panel_caps_t *caps
+    bool blink
 );
 bool pb_overlay_active(const pb_overlay_t *overlay);
 bool pb_overlay_take_expired(pb_overlay_t *overlay);

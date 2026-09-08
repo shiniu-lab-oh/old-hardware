@@ -13,6 +13,8 @@
 ## 当前组成
 
 - `sdk/old-panel/`：公开的前面板 SDK 与 LP Driver
+- `sdk/pb-hal/`：PB 通用硬件接口与 Old Panel Adapter
+- `sdk/pb-runtime/`：可复用的 View、Action、Timer、Overlay 与事件队列
 - `profiles/`：硬件能力、Pinout 和验证记录
 - `apps/pb-runtime/`：运行在 ESP32 上的通用 PB Runtime
 - `sdk/pb-app-protocol/`：公开的 PB App Protocol

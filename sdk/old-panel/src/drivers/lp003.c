@@ -6,6 +6,7 @@
 #include "driver/gpio.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
@@ -281,6 +282,7 @@ static void publish_key_event(unsigned index, bool pressed)
     const old_panel_key_event_t event = {
         .key = s_key_mapping[index].key,
         .pressed = pressed,
+        .sampled_at_ms = (uint64_t)(esp_timer_get_time() / 1000),
     };
     if (xQueueSend(s_key_event_queue, &event, 0) != pdPASS) {
         old_panel_key_event_t discarded;

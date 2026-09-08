@@ -9,7 +9,6 @@
 #include "esp_crt_bundle.h"
 #include "esp_http_client.h"
 #include "esp_log.h"
-#include "pb_view.h"
 
 #define PB_CLOUD_RESPONSE_CAPACITY 1536
 #define PB_CLOUD_URL_CAPACITY 256
@@ -243,8 +242,10 @@ static esp_err_t parse_state(
     const cJSON *brightness_item = cJSON_GetObjectItemCaseSensitive(view_item, "brightness");
     const cJSON *leds_item = cJSON_GetObjectItemCaseSensitive(view_item, "leds");
 
-    pb_view_t parsed;
-    pb_view_default(&parsed);
+    pb_view_t parsed = {
+        .leading_zeroes = true,
+        .brightness = 100,
+    };
     bool valid = cJSON_IsNumber(revision_item) && revision_item->valuedouble >= 0 &&
                  cJSON_IsString(app_item) && app_item->valuestring != NULL &&
                  app_item->valuestring[0] != '\0' &&

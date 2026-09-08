@@ -1,0 +1,16 @@
+idf_component_register(
+    SRCS
+        "src/pb_actions.c"
+        "src/pb_event_queue.c"
+        "src/pb_overlay.c"
+        "src/pb_timer.c"
+        "src/pb_view.c"
+    INCLUDE_DIRS
+        "include"
+    REQUIRES
+        pb-app-protocol
+        pb-hal
+        esp_hw_support
+        esp_timer
+        nvs_flash
+)

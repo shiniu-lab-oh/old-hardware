@@ -58,6 +58,14 @@ CONFIG_PB_PRIMARY_KEY_INDEX=3
 
 本次仅验证构建，没有烧录，也没有改写现有设备配置。
 
+2026-09-08 随后完成 PB HAL / Runtime Core 组件边界重构后的增量构建：
+
+- ESP-IDF 识别独立组件 `pb-hal` 与 `pb-runtime`
+- App `main` 不再直接编译 View、Action、Timer、Overlay 和事件队列
+- `pb_runtime.bin` 大小为 `0xe24c0` bytes
+- 1 MiB 应用分区仍剩余 12%
+- 本轮同样未烧录设备
+
 2026-09-07 已完成 PB Runtime 全量构建和 COM5 烧录，写入校验通过。
 启动日志确认：
 

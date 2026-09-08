@@ -26,6 +26,8 @@ typedef enum {
 typedef struct {
     old_panel_key_t key;
     bool pressed;
+    // Monotonic timestamp captured when the debounced transition is observed.
+    uint64_t sampled_at_ms;
 } old_panel_key_event_t;
 
 typedef struct {

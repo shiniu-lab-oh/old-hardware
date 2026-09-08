@@ -1,0 +1,9 @@
+idf_component_register(
+    SRCS
+        "src/pb_hal_old_panel.c"
+    INCLUDE_DIRS
+        "include"
+    PRIV_REQUIRES
+        old-panel
+        esp_timer
+)

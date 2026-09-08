@@ -6,6 +6,7 @@
 #include "esp_adc/adc_oneshot.h"
 #include "esp_log.h"
 #include "esp_rom_sys.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/task.h"
@@ -199,6 +200,7 @@ static void publish_key_event(lp001_key_t key, bool pressed)
     const old_panel_key_event_t event = {
         .key = lp001_key_to_old_panel_key(key),
         .pressed = pressed,
+        .sampled_at_ms = (uint64_t)(esp_timer_get_time() / 1000),
     };
     if (xQueueSend(s_key_event_queue, &event, 0) != pdPASS) {
         old_panel_key_event_t discarded;

@@ -15,11 +15,10 @@ esp_err_t pb_overlay_show_code(
     pb_overlay_t *overlay,
     int code,
     uint32_t duration_ms,
-    bool blink,
-    const old_panel_caps_t *caps
+    bool blink
 )
 {
-    if (overlay == NULL || caps == NULL || duration_ms == 0) {
+    if (overlay == NULL || duration_ms == 0) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -27,7 +26,7 @@ esp_err_t pb_overlay_show_code(
     pb_view_default(&view);
     view.value = code;
     view.blink = blink;
-    const esp_err_t err = pb_view_render(&view, caps);
+    const esp_err_t err = pb_view_render(&view);
     if (err == ESP_OK) {
         overlay->active = true;
         overlay->expires_at_us = esp_timer_get_time() + (int64_t)duration_ms * 1000LL;

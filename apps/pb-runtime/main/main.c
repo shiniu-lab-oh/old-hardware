@@ -13,10 +13,10 @@
 #include "freertos/event_groups.h"
 #include "freertos/task.h"
 #include "nvs_flash.h"
-#include "old_panel.h"
 #include "pb_actions.h"
 #include "pb_cloud.h"
 #include "pb_event_queue.h"
+#include "pb_hal.h"
 #include "pb_overlay.h"
 #include "pb_timer.h"
 #include "pb_view.h"
@@ -123,22 +123,20 @@ static bool wifi_connected(void)
 
 static esp_err_t render_current(
     pb_local_timer_t *timer,
-    const pb_view_t *app_view,
-    const old_panel_caps_t *caps
+    const pb_view_t *app_view
 )
 {
     if (!pb_timer_active(timer)) {
-        return pb_view_render(app_view, caps);
+        return pb_view_render(app_view);
     }
 
     pb_view_t timer_view;
     pb_timer_make_view(timer, app_view, &timer_view);
-    return pb_view_render(&timer_view, caps);
+    return pb_view_render(&timer_view);
 }
 
 static esp_err_t sync_view(
     pb_cloud_t *cloud,
-    const old_panel_caps_t *caps,
     pb_view_t *current_view,
     uint64_t *current_revision,
     bool *has_current_revision,
@@ -165,7 +163,7 @@ static esp_err_t sync_view(
     if (*has_current_revision && next_state.revision == *current_revision) {
         if (timer_was_active && !pb_timer_active(timer) &&
             !pb_overlay_active(overlay)) {
-            return pb_view_render(current_view, caps);
+            return pb_view_render(current_view);
         }
         ESP_LOGD(TAG, "State revision=%" PRIu64 " unchanged", *current_revision);
         return ESP_OK;
@@ -188,11 +186,10 @@ static esp_err_t sync_view(
             overlay,
             next_state.overlay.value,
             next_state.overlay.duration_ms,
-            next_state.overlay.blink,
-            caps);
+            next_state.overlay.blink);
     }
     if (!pb_overlay_active(overlay)) {
-        return render_current(timer, current_view, caps);
+        return render_current(timer, current_view);
     }
     return ESP_OK;
 }
@@ -296,18 +293,19 @@ void app_main(void)
     static pb_event_queue_t event_queue;
     ESP_ERROR_CHECK(pb_event_queue_init(&event_queue));
 
-    const old_panel_config_t panel_config = {
+    const pb_hal_config_t panel_config = {
         .profile_id = CONFIG_PB_PANEL_PROFILE,
+        .primary_key_index = CONFIG_PB_PRIMARY_KEY_INDEX,
     };
-    ESP_ERROR_CHECK(old_panel_init(&panel_config));
+    ESP_ERROR_CHECK(pb_hal_init(&panel_config));
 
-    old_panel_caps_t caps;
-    ESP_ERROR_CHECK(old_panel_get_capabilities(&caps));
+    pb_hal_caps_t caps;
+    ESP_ERROR_CHECK(pb_hal_get_capabilities(&caps));
 
     pb_overlay_t overlay;
     pb_overlay_init(&overlay);
     ESP_ERROR_CHECK(pb_overlay_show_code(
-        &overlay, 888, CONFIG_PB_BOOT_OVERLAY_MS, false, &caps));
+        &overlay, 888, CONFIG_PB_BOOT_OVERLAY_MS, false));
     vTaskDelay(pdMS_TO_TICKS(CONFIG_PB_BOOT_OVERLAY_MS));
     pb_overlay_init(&overlay);
 
@@ -325,7 +323,7 @@ void app_main(void)
 
     pb_local_timer_t timer;
     pb_timer_init(&timer);
-    ESP_ERROR_CHECK(pb_view_render(&current_view, &caps));
+    ESP_ERROR_CHECK(pb_view_render(&current_view));
 
     const pb_cloud_config_t cloud_config = {
         .base_url = CONFIG_PB_CLOUD_BASE_URL,
@@ -347,11 +345,16 @@ void app_main(void)
              CONFIG_PB_DEVICE_SERIAL,
              CONFIG_PB_PANEL_PROFILE,
              (unsigned long long)current_revision);
+    ESP_LOGI(TAG,
+             "PB HAL ready: digits=%u controls=%u leds=%u",
+             caps.display_digits,
+             caps.physical_controls,
+             caps.controllable_leds);
 
     TickType_t next_poll = 0;
     TickType_t next_event_retry = 0;
     bool primary_pressed = false;
-    TickType_t primary_pressed_at = 0;
+    uint64_t primary_pressed_at_ms = 0;
 
     while (true) {
         const TickType_t now = xTaskGetTickCount();
@@ -359,12 +362,12 @@ void app_main(void)
         if (s_offline_overlay_pending) {
             s_offline_overlay_pending = false;
             ESP_ERROR_CHECK_WITHOUT_ABORT(pb_overlay_show_code(
-                &overlay, 404, CONFIG_PB_OFFLINE_OVERLAY_MS, false, &caps));
+                &overlay, 404, CONFIG_PB_OFFLINE_OVERLAY_MS, false));
         }
 
         if (pb_timer_poll_finished(&timer)) {
             if (!pb_overlay_active(&overlay)) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(pb_view_render(&current_view, &caps));
+                ESP_ERROR_CHECK_WITHOUT_ABORT(pb_view_render(&current_view));
             }
             if (cloud_err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
@@ -375,12 +378,12 @@ void app_main(void)
             const uint32_t minutes =
                 (pb_timer_remaining_seconds(&timer) + 59U) / 60U;
             if (minutes != timer.last_displayed_minutes) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view, &caps));
+                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
             }
         }
 
         if (pb_overlay_take_expired(&overlay)) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view, &caps));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
         }
 
         if (cloud_err == ESP_OK && wifi_connected() &&
@@ -391,7 +394,6 @@ void app_main(void)
             if (err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(sync_view(
                     &cloud,
-                    &caps,
                     &current_view,
                     &current_revision,
                     &has_current_revision,
@@ -405,7 +407,6 @@ void app_main(void)
             (next_poll == 0 || (int32_t)(now - next_poll) >= 0)) {
             const esp_err_t err = sync_view(
                 &cloud,
-                &caps,
                 &current_view,
                 &current_revision,
                 &has_current_revision,
@@ -417,17 +418,17 @@ void app_main(void)
             next_poll = now + pdMS_TO_TICKS(CONFIG_PB_POLL_INTERVAL_SECONDS * 1000);
         }
 
-        old_panel_key_event_t key_event;
-        if (!old_panel_wait_key_event(&key_event, pdMS_TO_TICKS(100))) {
+        pb_input_event_t input_event;
+        if (!pb_hal_wait_input_event(&input_event, 100)) {
             continue;
         }
-        if (pb_action_from_panel_key(key_event.key) == PB_ACTION_NONE) {
+        if (pb_action_from_control(input_event.control) == PB_ACTION_NONE) {
             continue;
         }
 
-        if (key_event.pressed) {
+        if (input_event.pressed) {
             primary_pressed = true;
-            primary_pressed_at = xTaskGetTickCount();
+            primary_pressed_at_ms = input_event.sampled_at_ms;
             continue;
         }
         if (!primary_pressed) {
@@ -435,8 +436,10 @@ void app_main(void)
         }
 
         primary_pressed = false;
-        const uint32_t held_ms =
-            (uint32_t)((xTaskGetTickCount() - primary_pressed_at) * portTICK_PERIOD_MS);
+        const uint32_t held_ms = input_event.sampled_at_ms >= primary_pressed_at_ms
+                                     ? (uint32_t)(input_event.sampled_at_ms -
+                                                  primary_pressed_at_ms)
+                                     : 0;
         if (held_ms >= CONFIG_PB_PRIMARY_LONG_PRESS_MS) {
             if (timer.status == PB_LOCAL_TIMER_RUNNING) {
                 ESP_LOGI(TAG, "Long action ignored while timer is running");
@@ -451,7 +454,7 @@ void app_main(void)
         } else if (pb_timer_enabled(&timer)) {
             const pb_timer_event_t event = pb_timer_toggle(&timer);
             if (!pb_overlay_active(&overlay)) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view, &caps));
+                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
             }
             if (cloud_err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(

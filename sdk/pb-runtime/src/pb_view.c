@@ -2,12 +2,19 @@
 
 #include <string.h>
 
+#include "esp_log.h"
 #include "nvs.h"
+#include "pb_hal.h"
 
 #define PB_VIEW_STORE_MAGIC 0x50425631U
 #define PB_VIEW_STORE_VERSION 2U
 #define PB_VIEW_SOURCE_HASH_OFFSET UINT64_C(14695981039346656037)
 #define PB_VIEW_SOURCE_HASH_PRIME UINT64_C(1099511628211)
+
+static const char *TAG = "pb_view";
+
+_Static_assert(PB_VIEW_MAX_LEDS <= PB_HAL_MAX_LEDS,
+               "PB View LED capacity exceeds PB HAL capacity");
 
 typedef struct {
     uint32_t magic;
@@ -47,40 +54,32 @@ void pb_view_default(pb_view_t *view)
     view->brightness = 100;
 }
 
-esp_err_t pb_view_render(const pb_view_t *view, const old_panel_caps_t *caps)
+esp_err_t pb_view_render(const pb_view_t *view)
 {
-    if (view == NULL || caps == NULL) {
+    if (view == NULL || view->led_count > PB_VIEW_MAX_LEDS) {
         return ESP_ERR_INVALID_ARG;
     }
 
-    esp_err_t err = old_panel_display_value(view->value, view->leading_zeroes, 0);
-    if (err != ESP_OK) {
-        return err;
-    }
+    pb_presentation_t presentation = {
+        .type = PB_PRESENTATION_NUMBER,
+        .number = view->value,
+        .leading_zeroes = view->leading_zeroes,
+        .brightness = view->brightness,
+        .blink = view->blink,
+        .blink_interval_ms = 500,
+        .led_count = view->led_count,
+    };
+    memcpy(presentation.leds, view->leds, sizeof(view->leds));
 
-    if (caps->supports_brightness) {
-        err = old_panel_set_brightness(view->brightness);
-        if (err != ESP_OK) {
-            return err;
-        }
+    const pb_render_result_t result = pb_hal_render(&presentation);
+    if (result.status == PB_RENDER_APPLIED) {
+        return ESP_OK;
     }
-
-    if (caps->supports_blink) {
-        err = old_panel_set_blink(view->blink, view->blink ? 500 : 0);
-        if (err != ESP_OK) {
-            return err;
-        }
+    if (result.status == PB_RENDER_DEGRADED) {
+        ESP_LOGW(TAG, "Presentation applied with hardware degradation");
+        return ESP_OK;
     }
-
-    for (uint8_t i = 0; i < caps->leds; ++i) {
-        const bool on = i < view->led_count ? view->leds[i] : false;
-        err = old_panel_set_led(i, on);
-        if (err != ESP_OK) {
-            return err;
-        }
-    }
-
-    return ESP_OK;
+    return result.error != ESP_OK ? result.error : ESP_FAIL;
 }
 
 esp_err_t pb_view_load_last(
