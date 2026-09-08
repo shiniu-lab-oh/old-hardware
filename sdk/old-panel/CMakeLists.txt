@@ -3,6 +3,7 @@ idf_component_register(
         "src/old_panel.c"
         "src/old_panel_registry.c"
         "src/drivers/lp001.c"
+        "src/drivers/lp003.c"
     INCLUDE_DIRS
         "include"
     PRIV_INCLUDE_DIRS
@@ -10,4 +11,5 @@ idf_component_register(
     REQUIRES
         esp_adc
         esp_driver_gpio
+        esp_rom
 )

@@ -4,9 +4,11 @@
 #include <string.h>
 
 #include "drivers/lp001.h"
+#include "drivers/lp003.h"
 
 static const old_panel_driver_t *const s_drivers[] = {
     &old_panel_driver_lp001,
+    &old_panel_driver_lp003,
 };
 
 const old_panel_driver_t *old_panel_registry_find(const char *profile_id)
