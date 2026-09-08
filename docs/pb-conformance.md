@@ -34,11 +34,11 @@ Timer / Action Binding、一次性 Overlay、stale/conflict State、接口故障
 | 全部物理键 | PASS | PASS | NOT RUN |
 | Profile PRIMARY | PASS (KEY_6 / OK) | PASS (KEY_3 / OK) | NOT RUN |
 | Runtime + Cloud State | PASS | PASS | NOT RUN |
-| 固定测试 App 全流程 | NOT RUN | PASS | NOT RUN |
-| 断网继续交互 | NOT RUN | PARTIAL (Event API) | NOT RUN |
-| 离线重启恢复 Binding | NOT RUN | PASS (State API 故障注入) | NOT RUN |
+| 固定测试 App 全流程 | PASS | PASS | NOT RUN |
+| 断网继续交互 | PARTIAL (Event API) | PARTIAL (Event API) | NOT RUN |
+| 离线重启恢复 Binding | PASS (State API 故障注入) | PASS (State API 故障注入) | NOT RUN |
 | 运行中断电不伪造完成 | NOT RUN | NOT RUN | NOT RUN |
-| 离线事件按原 Binding 补发 | NOT RUN | PASS | NOT RUN |
+| 离线事件按原 Binding 补发 | PASS | PASS | NOT RUN |
 | Cloud / Device 身份切换不串发事件 | NOT RUN | NOT RUN | NOT RUN |
 
 Runtime 0.3 已实现上述离线重启与事件归属所需的软件路径。矩阵只将已有实机证据的
@@ -53,8 +53,18 @@ Runtime 从 NVS 恢复 Timer Binding revision 5；用户确认面板稳定显示
 `0008`，PRIMARY 后更新为 `0009`。固定测试 App 流程标为 `PASS`；真正的 Wi-Fi 断开
 和运行中断电仍按独立 Local First 项记录，不计入该结论。
 
-LP-003 的详细证据见 `profiles/LP-003/validation.md`。第二种 VFD 在芯片、接线和能力完成
-逆向前保持 `NOT RUN`，不预设其显示和输入能力。
+2026-09-08，LP-001 使用同一 Runtime Core 和 Mock Cloud 完成对应实机流程：启动显示
+`888 -> 007`，KEY_6 / OK 驱动 Timer 的 started、paused、resumed、finished 生命周期；
+`666` Overlay 到期后恢复运行中的 Timer。Event API 返回 503 时，started 与 paused 以
+2 pending 保存在 NVS FIFO，恢复后按原顺序补发，重复数为 0。设备无需重烧即可切换到
+Action Binding，并完成 `008 -> 009`；stale revision 和同 revision conflict 均被拒绝。
+State API 关闭后软重启，Runtime 从 NVS 恢复 Action Binding revision 12，用户确认启动
+`888` 后仍显示 `009`，期间没有产生新事件。另一轮测试在 Event API 关闭时从 Timer
+revision 13 切换到 Action revision 14；恢复后补发的 started、finished 仍携带原始
+`pb.conformance.timer@13` 上下文，重复数保持 0。
+
+详细证据见 `profiles/LP-001/validation.md` 和 `profiles/LP-003/validation.md`。第二种 VFD
+在芯片、接线和能力完成逆向前保持 `NOT RUN`，不预设其显示和输入能力。
 
 ## 通过标准
 

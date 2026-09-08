@@ -20,3 +20,5 @@
 - Pinout：verified
 - Driver：sdk_verified
 - 生产可用：false
+
+PB Runtime 实机结果见 [validation.md](validation.md)。
