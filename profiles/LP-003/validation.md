@@ -118,13 +118,27 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 - Event API 返回 503 时，本地 Timer 继续运行；started 与 paused 保存在 NVS FIFO，
   接口恢复后按原顺序补发并回到 0 pending
 - 补发事件保留 `pb.conformance.timer` 和产生时 revision 5，Mock Cloud 未发现重复事件
-- Action Binding 已在协议和 Runtime 日志层完成 `8 -> 9` 更新，物理显示仍待用户确认
+- Action Binding 已在协议、Runtime 日志和物理显示层完成 `0008 -> 0009` 更新
 - State 与 Event API 同时返回 503 时软重启设备，Runtime 从 NVS 恢复
   `pb.conformance.timer` revision 5，待发事件为 0
 - 用户确认重启后面板稳定显示 `0007`，没有闪烁或继续倒计时；Mock Cloud 事件数保持
   13，未产生伪造的 Timer 生命周期事件
 - 恢复 State 与 Event API 后，Runtime 继续拉取 revision 5，事件数和重复数均未变化
 - 本轮未执行真正的 Wi-Fi 断开、设备断电或 Device Serial 切换
+
+2026-09-08 完成 Core 组装边界拆分后的第二轮实机回归：
+
+- 通用单写入者循环迁入 `sdk/pb-runtime`，App `main.c` 只保留 ESP-IDF 平台初始化和
+  Transport 回调装配
+- Runtime 版本字符串由 `pb_runtime.h` 统一导出，HTTP Worker 通过通用 Transport
+  Result 与 Core 通讯
+- LP-001 与 LP-003 使用独立 Profile 构建目录编译通过；两份固件均为 `0xe37f0`
+  bytes，1 MiB 应用分区剩余 11%
+- LP-003 固件在 COM3 重新烧录成功，三个镜像均通过 Hash 校验
+- 启动后恢复 `pb.conformance.timer` revision 6，PRIMARY 生成 `started 90/90`，事件
+  成功提交并从 1 pending 回到 0
+- 切换到 `pb.conformance.action` 不需要重烧；用户确认面板先显示 `0008`，PRIMARY 后
+  显示 `0009`
 
 ## 已验证矩阵
 
@@ -142,7 +156,7 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 | `666` Overlay 后恢复 Timer | PASS | 用户视觉确认，Runtime revision 2 日志 |
 | Event API 故障后 FIFO 补发 | PASS | 2 pending 按 started、paused 顺序清空 |
 | stale / conflict State 拒绝 | PASS | Runtime 串口日志 |
-| Timer / Action Binding 热切换 | PARTIAL | 协议与日志通过，Action 数字待视觉确认 |
+| Timer / Action Binding 热切换 | PASS | 用户确认同一固件显示 `0008 -> 0009` |
 | State API 故障时重启恢复 Binding | PASS | NVS 恢复 revision 5，用户确认稳定显示 `0007` |
 | 重启不伪造 Timer 事件 | PASS | 重启前后 Mock Cloud 事件数保持 13 |
 | hello-panel 完整流程 | NOT RUN | 待实机验收 |
@@ -154,4 +168,4 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 - 补充 `photos/lp003-panel.jpg` 与 `photos/lp003-pinout.png`。
 - 只按 `pinout.md` 断开并重新接线，升级 Pinout 为 `verified`。
 - 跑通 LP-003 的 `hello-panel` 和 `factory-test`。
-- 在 Runtime Core / HAL 拆分后重新执行本矩阵。
+- 使用 LP-001 运行相同的 PB Conformance 实机流程。

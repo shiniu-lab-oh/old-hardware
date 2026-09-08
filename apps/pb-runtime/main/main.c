@@ -1,4 +1,3 @@
-#include <inttypes.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <string.h>
@@ -11,22 +10,13 @@
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
-#include "freertos/task.h"
 #include "nvs_flash.h"
-#include "pb_actions.h"
-#include "pb_binding.h"
-#include "pb_event_queue.h"
 #include "pb_hal.h"
 #include "pb_network_worker.h"
-#include "pb_overlay.h"
-#include "pb_timer.h"
-#include "pb_view.h"
+#include "pb_runtime.h"
 #include "sdkconfig.h"
 
 #define PB_WIFI_CONNECTED_BIT BIT0
-#define PB_RUNTIME_VERSION "pb-runtime/0.3.0"
-#define PB_EVENT_RETRY_INTERVAL_MS 5000
-#define PB_BINDING_STORE_RETRY_INTERVAL_MS 5000
 
 static const char *TAG = "pb_runtime";
 static EventGroupHandle_t s_wifi_events;
@@ -37,14 +27,14 @@ static void wifi_event_handler(
     void *argument,
     esp_event_base_t event_base,
     int32_t event_id,
-    void *event_data
-)
+    void *event_data)
 {
     (void)argument;
 
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
         esp_wifi_connect();
-    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+    } else if (event_base == WIFI_EVENT &&
+               event_id == WIFI_EVENT_STA_DISCONNECTED) {
         xEventGroupClearBits(s_wifi_events, PB_WIFI_CONNECTED_BIT);
         if (s_had_wifi_connection) {
             s_offline_overlay_pending = true;
@@ -63,7 +53,8 @@ static void wifi_event_handler(
 static esp_err_t init_nvs(void)
 {
     esp_err_t err = nvs_flash_init();
-    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES ||
+        err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
         ESP_ERROR_CHECK(nvs_flash_erase());
         err = nvs_flash_init();
     }
@@ -83,7 +74,9 @@ static esp_err_t start_wifi(void)
 
     ESP_RETURN_ON_ERROR(esp_netif_init(), TAG, "esp_netif_init failed");
     ESP_RETURN_ON_ERROR(
-        esp_event_loop_create_default(), TAG, "event loop creation failed");
+        esp_event_loop_create_default(),
+        TAG,
+        "event loop creation failed");
     if (esp_netif_create_default_wifi_sta() == NULL) {
         return ESP_ERR_NO_MEM;
     }
@@ -91,219 +84,92 @@ static esp_err_t start_wifi(void)
     esp_sntp_config_t sntp_config =
         ESP_NETIF_SNTP_DEFAULT_CONFIG(CONFIG_PB_SNTP_SERVER);
     ESP_RETURN_ON_ERROR(
-        esp_netif_sntp_init(&sntp_config), TAG, "SNTP initialization failed");
+        esp_netif_sntp_init(&sntp_config),
+        TAG,
+        "SNTP initialization failed");
 
     wifi_init_config_t init_config = WIFI_INIT_CONFIG_DEFAULT();
     ESP_RETURN_ON_ERROR(esp_wifi_init(&init_config), TAG, "esp_wifi_init failed");
     ESP_RETURN_ON_ERROR(
-        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, wifi_event_handler, NULL),
+        esp_event_handler_register(
+            WIFI_EVENT,
+            ESP_EVENT_ANY_ID,
+            wifi_event_handler,
+            NULL),
         TAG,
         "Wi-Fi event registration failed");
     ESP_RETURN_ON_ERROR(
-        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, wifi_event_handler, NULL),
+        esp_event_handler_register(
+            IP_EVENT,
+            IP_EVENT_STA_GOT_IP,
+            wifi_event_handler,
+            NULL),
         TAG,
         "IP event registration failed");
 
     wifi_config_t wifi_config = {0};
-    strlcpy((char *)wifi_config.sta.ssid, CONFIG_PB_WIFI_SSID,
-            sizeof(wifi_config.sta.ssid));
-    strlcpy((char *)wifi_config.sta.password, CONFIG_PB_WIFI_PASSWORD,
-            sizeof(wifi_config.sta.password));
+    strlcpy(
+        (char *)wifi_config.sta.ssid,
+        CONFIG_PB_WIFI_SSID,
+        sizeof(wifi_config.sta.ssid));
+    strlcpy(
+        (char *)wifi_config.sta.password,
+        CONFIG_PB_WIFI_PASSWORD,
+        sizeof(wifi_config.sta.password));
     wifi_config.sta.threshold.authmode = WIFI_AUTH_OPEN;
 
-    ESP_RETURN_ON_ERROR(esp_wifi_set_mode(WIFI_MODE_STA), TAG, "Wi-Fi mode failed");
     ESP_RETURN_ON_ERROR(
-        esp_wifi_set_config(WIFI_IF_STA, &wifi_config), TAG, "Wi-Fi config failed");
+        esp_wifi_set_mode(WIFI_MODE_STA),
+        TAG,
+        "Wi-Fi mode failed");
+    ESP_RETURN_ON_ERROR(
+        esp_wifi_set_config(WIFI_IF_STA, &wifi_config),
+        TAG,
+        "Wi-Fi config failed");
     return esp_wifi_start();
 }
 
-static bool wifi_connected(void)
+static bool transport_is_online(void *context)
 {
+    (void)context;
     return s_wifi_events != NULL &&
            (xEventGroupGetBits(s_wifi_events) & PB_WIFI_CONNECTED_BIT) != 0;
 }
 
-static esp_err_t render_current(
-    pb_local_timer_t *timer,
-    const pb_view_t *app_view
-)
+static bool transport_take_offline_transition(void *context)
 {
-    if (!pb_timer_active(timer)) {
-        return pb_view_render(app_view);
+    (void)context;
+    if (!s_offline_overlay_pending) {
+        return false;
     }
-
-    pb_view_t timer_view;
-    pb_timer_make_view(timer, app_view, &timer_view);
-    return pb_view_render(&timer_view);
+    s_offline_overlay_pending = false;
+    return true;
 }
 
-static esp_err_t apply_state(
-    const pb_app_state_t *next_state,
-    const char *cloud_base_url,
-    const char *device_serial,
-    pb_binding_t *current_binding,
-    bool *has_current_binding,
-    bool *binding_store_dirty,
-    bool *binding_replaced,
-    pb_local_timer_t *timer,
-    pb_overlay_t *overlay
-)
+static esp_err_t transport_request_state(void *context)
 {
-    *binding_replaced = false;
-    if (*has_current_binding &&
-        next_state->revision < current_binding->revision) {
-        ESP_LOGW(TAG,
-                 "Ignoring stale state revision=%" PRIu64 " current=%" PRIu64,
-                 next_state->revision,
-                 current_binding->revision);
-        return ESP_OK;
-    }
-
-    if (*has_current_binding &&
-        next_state->revision == current_binding->revision) {
-        if (!pb_binding_matches_state(current_binding, next_state)) {
-            ESP_LOGE(TAG,
-                     "Conflicting state at revision=%" PRIu64 " ignored",
-                     current_binding->revision);
-            return ESP_ERR_INVALID_RESPONSE;
-        }
-        ESP_LOGD(TAG,
-                 "State revision=%" PRIu64 " unchanged",
-                 current_binding->revision);
-        return ESP_OK;
-    }
-
-    pb_binding_t next_binding;
-    esp_err_t err = pb_binding_from_state(&next_binding, next_state);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    const bool app_changed = !*has_current_binding ||
-        strcmp(current_binding->app_id, next_binding.app_id) != 0;
-    err = pb_binding_store(
-        cloud_base_url,
-        device_serial,
-        &next_binding);
-    if (err != ESP_OK) {
-        *binding_store_dirty = true;
-        ESP_LOGW(TAG,
-                 "Could not persist binding; retry scheduled: %s",
-                 esp_err_to_name(err));
-    } else {
-        *binding_store_dirty = false;
-    }
-
-    if (app_changed) {
-        pb_timer_init(timer);
-        pb_overlay_init(overlay);
-        *binding_replaced = true;
-    }
-    pb_timer_configure(timer, &next_binding.timer);
-    *current_binding = next_binding;
-    *has_current_binding = true;
-
-    ESP_LOGI(TAG,
-             "%s App binding: app=%s revision=%" PRIu64,
-             app_changed ? "Activated" : "Updated",
-             current_binding->app_id,
-             current_binding->revision);
-
-    if (next_state->overlay.enabled) {
-        return pb_overlay_show_code(
-            overlay,
-            next_state->overlay.value,
-            next_state->overlay.duration_ms,
-            next_state->overlay.blink);
-    }
-    if (!pb_overlay_active(overlay)) {
-        return render_current(timer, &current_binding->view);
-    }
-    return ESP_OK;
+    (void)context;
+    return pb_network_worker_request_state();
 }
 
-static esp_err_t enqueue_timer_event(
-    pb_event_queue_t *queue,
-    const pb_binding_t *binding,
-    pb_local_timer_t *timer,
-    pb_timer_event_t event
-)
+static esp_err_t transport_post_event(void *context, const pb_event_t *event)
 {
-    if (queue == NULL || binding == NULL || timer == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    static const char *const names[] = {"started", "paused", "resumed", "finished"};
-    ESP_LOGI(TAG,
-             "Timer %s: duration=%" PRIu32 " remaining=%" PRIu32,
-             names[event],
-             timer->duration_seconds,
-             pb_timer_remaining_seconds(timer));
-    pb_event_t pending;
-    esp_err_t err = pb_event_make_timer(
-        &pending,
-        event,
-        timer->duration_seconds,
-        event == PB_TIMER_EVENT_FINISHED ? 0 : pb_timer_remaining_seconds(timer));
-    if (err == ESP_OK) {
-        err = pb_event_set_context(
-            &pending,
-            binding->app_id,
-            binding->revision);
-    }
-    if (err == ESP_OK) {
-        err = pb_event_queue_enqueue(queue, &pending);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Could not queue timer event: %s", esp_err_to_name(err));
-        return err;
-    }
-    ESP_LOGI(TAG,
-             "Queued event %s (%u pending)",
-             pending.event_id,
-             (unsigned)pb_event_queue_count(queue));
-    return ESP_OK;
+    (void)context;
+    return pb_network_worker_post_event(event);
 }
 
-static esp_err_t enqueue_action_event(
-    pb_event_queue_t *queue,
-    const pb_binding_t *binding,
-    pb_action_t action
-)
+static bool transport_receive(
+    void *context,
+    pb_runtime_transport_result_t *result,
+    uint32_t timeout_ms)
 {
-    if (queue == NULL || binding == NULL) {
-        return ESP_ERR_INVALID_ARG;
-    }
-    pb_event_t pending;
-    esp_err_t err = pb_event_make_action(&pending, action);
-    if (err == ESP_OK) {
-        err = pb_event_set_context(
-            &pending,
-            binding->app_id,
-            binding->revision);
-    }
-    if (err == ESP_OK) {
-        err = pb_event_queue_enqueue(queue, &pending);
-    }
-    if (err != ESP_OK) {
-        ESP_LOGE(TAG, "Could not queue action event: %s", esp_err_to_name(err));
-        return err;
-    }
-    ESP_LOGI(TAG,
-             "Queued event %s (%u pending)",
-             pending.event_id,
-             (unsigned)pb_event_queue_count(queue));
-    return ESP_OK;
+    (void)context;
+    return pb_network_worker_receive(result, timeout_ms);
 }
 
 void app_main(void)
 {
     ESP_ERROR_CHECK(init_nvs());
-
-    static pb_event_queue_t event_queue;
-    ESP_ERROR_CHECK(pb_event_queue_init(
-        &event_queue,
-        CONFIG_PB_CLOUD_BASE_URL,
-        CONFIG_PB_DEVICE_SERIAL));
 
     const pb_hal_config_t panel_config = {
         .profile_id = CONFIG_PB_PANEL_PROFILE,
@@ -314,49 +180,35 @@ void app_main(void)
     pb_hal_caps_t caps;
     ESP_ERROR_CHECK(pb_hal_get_capabilities(&caps));
 
-    pb_overlay_t overlay;
-    pb_overlay_init(&overlay);
-    ESP_ERROR_CHECK(pb_overlay_show_code(
-        &overlay, 888, CONFIG_PB_BOOT_OVERLAY_MS, false));
-    vTaskDelay(pdMS_TO_TICKS(CONFIG_PB_BOOT_OVERLAY_MS));
-    pb_overlay_init(&overlay);
-
-    pb_binding_t current_binding;
-    pb_binding_init(&current_binding);
-    bool has_current_binding =
-        pb_binding_load(
-            CONFIG_PB_CLOUD_BASE_URL,
-            CONFIG_PB_DEVICE_SERIAL,
-            &current_binding) == ESP_OK;
-    if (!has_current_binding) {
-        uint64_t legacy_revision;
-        if (pb_view_load_last(
-                CONFIG_PB_CLOUD_BASE_URL,
-                CONFIG_PB_DEVICE_SERIAL,
-                &current_binding.view,
-                &legacy_revision) == ESP_OK) {
-            ESP_LOGW(TAG,
-                     "Loaded legacy View revision=%" PRIu64
-                     " without App binding; waiting for a complete State",
-                     legacy_revision);
-        }
-    }
-
-    pb_local_timer_t timer;
-    pb_timer_init(&timer);
-    if (has_current_binding) {
-        pb_timer_configure(&timer, &current_binding.timer);
-    }
-    ESP_ERROR_CHECK(pb_view_render(&current_binding.view));
-
     const pb_cloud_config_t cloud_config = {
         .base_url = CONFIG_PB_CLOUD_BASE_URL,
         .device_serial = CONFIG_PB_DEVICE_SERIAL,
         .device_token = CONFIG_PB_DEVICE_TOKEN,
-        .firmware_version = PB_RUNTIME_VERSION,
+        .firmware_version = PB_RUNTIME_FIRMWARE_VERSION,
         .timeout_ms = CONFIG_PB_HTTP_TIMEOUT_MS,
     };
     const esp_err_t network_err = pb_network_worker_start(&cloud_config);
+
+    const pb_runtime_config_t runtime_config = {
+        .cloud_base_url = CONFIG_PB_CLOUD_BASE_URL,
+        .device_serial = CONFIG_PB_DEVICE_SERIAL,
+        .poll_interval_ms = CONFIG_PB_POLL_INTERVAL_SECONDS * 1000U,
+        .primary_long_press_ms = CONFIG_PB_PRIMARY_LONG_PRESS_MS,
+        .boot_overlay_ms = CONFIG_PB_BOOT_OVERLAY_MS,
+        .offline_overlay_ms = CONFIG_PB_OFFLINE_OVERLAY_MS,
+        .transport = {
+            .enabled = network_err == ESP_OK,
+            .context = NULL,
+            .is_online = transport_is_online,
+            .take_offline_transition = transport_take_offline_transition,
+            .request_state = transport_request_state,
+            .post_event = transport_post_event,
+            .receive = transport_receive,
+        },
+    };
+    pb_runtime_status_t runtime_status;
+    ESP_ERROR_CHECK(pb_runtime_init(&runtime_config, &runtime_status));
+
     const esp_err_t wifi_err = start_wifi();
     if (network_err != ESP_OK || wifi_err != ESP_OK) {
         ESP_LOGE(TAG,
@@ -367,263 +219,13 @@ void app_main(void)
              "PB Runtime ready: serial=%s profile=%s app=%s cached_revision=%llu",
              CONFIG_PB_DEVICE_SERIAL,
              CONFIG_PB_PANEL_PROFILE,
-             has_current_binding ? current_binding.app_id : "none",
-             (unsigned long long)current_binding.revision);
+             runtime_status.has_binding ? runtime_status.app_id : "none",
+             (unsigned long long)runtime_status.revision);
     ESP_LOGI(TAG,
              "PB HAL ready: digits=%u controls=%u leds=%u",
              caps.display_digits,
              caps.physical_controls,
              caps.controllable_leds);
 
-    TickType_t next_poll = 0;
-    TickType_t next_event_retry = 0;
-    TickType_t next_binding_store_retry = 0;
-    bool state_request_in_flight = false;
-    bool event_request_in_flight = false;
-    bool binding_store_dirty = false;
-    bool primary_pressed = false;
-    uint64_t primary_pressed_at_ms = 0;
-
-    while (true) {
-        const TickType_t now = xTaskGetTickCount();
-
-        pb_network_result_t network_result;
-        while (network_err == ESP_OK &&
-               pb_network_worker_receive(&network_result, 0)) {
-            if (network_result.type == PB_NETWORK_RESULT_STATE) {
-                state_request_in_flight = false;
-                if (network_result.error != ESP_OK) {
-                    ESP_LOGW(TAG,
-                             "State sync failed; keeping local state: %s",
-                             esp_err_to_name(network_result.error));
-                    continue;
-                }
-
-                bool binding_replaced;
-                const esp_err_t err = apply_state(
-                    &network_result.data.state,
-                    CONFIG_PB_CLOUD_BASE_URL,
-                    CONFIG_PB_DEVICE_SERIAL,
-                    &current_binding,
-                    &has_current_binding,
-                    &binding_store_dirty,
-                    &binding_replaced,
-                    &timer,
-                    &overlay);
-                if (binding_replaced) {
-                    primary_pressed = false;
-                }
-                if (binding_store_dirty && next_binding_store_retry == 0) {
-                    next_binding_store_retry = now +
-                        pdMS_TO_TICKS(PB_BINDING_STORE_RETRY_INTERVAL_MS);
-                } else if (!binding_store_dirty) {
-                    next_binding_store_retry = 0;
-                }
-                if (err != ESP_OK) {
-                    ESP_LOGW(TAG,
-                             "State apply failed; keeping local state: %s",
-                             esp_err_to_name(err));
-                }
-                continue;
-            }
-
-            if (network_result.type != PB_NETWORK_RESULT_EVENT) {
-                ESP_LOGE(TAG,
-                         "Ignoring unknown network result type: %d",
-                         (int)network_result.type);
-                continue;
-            }
-
-            event_request_in_flight = false;
-            const pb_event_t *pending = pb_event_queue_peek(&event_queue);
-            if (network_result.error != ESP_OK) {
-                ESP_LOGW(TAG,
-                         "Event %s delivery failed; retained for retry: %s",
-                         network_result.data.event.event_id,
-                         esp_err_to_name(network_result.error));
-                next_event_retry = now +
-                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
-                continue;
-            }
-            if (pending == NULL ||
-                strcmp(pending->event_id, network_result.data.event.event_id) != 0) {
-                ESP_LOGE(TAG,
-                         "Unexpected event acknowledgement: %s",
-                         network_result.data.event.event_id);
-                next_event_retry = now +
-                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
-                continue;
-            }
-
-            const esp_err_t err = pb_event_queue_pop(&event_queue);
-            if (err != ESP_OK) {
-                ESP_LOGE(TAG,
-                         "Event %s acknowledged but could not be removed: %s",
-                         network_result.data.event.event_id,
-                         esp_err_to_name(err));
-                next_event_retry = now +
-                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
-                continue;
-            }
-            ESP_LOGI(TAG,
-                     "Delivered event %s at revision=%" PRIu64 " (%u pending)",
-                     network_result.data.event.event_id,
-                     network_result.data.event.revision,
-                     (unsigned)pb_event_queue_count(&event_queue));
-            next_event_retry = 0;
-            next_poll = 0;
-        }
-
-        if (s_offline_overlay_pending) {
-            s_offline_overlay_pending = false;
-            ESP_ERROR_CHECK_WITHOUT_ABORT(pb_overlay_show_code(
-                &overlay, 404, CONFIG_PB_OFFLINE_OVERLAY_MS, false));
-        }
-
-        if (binding_store_dirty &&
-            (next_binding_store_retry == 0 ||
-             (int32_t)(now - next_binding_store_retry) >= 0)) {
-            const esp_err_t err = pb_binding_store(
-                CONFIG_PB_CLOUD_BASE_URL,
-                CONFIG_PB_DEVICE_SERIAL,
-                &current_binding);
-            if (err == ESP_OK) {
-                binding_store_dirty = false;
-                next_binding_store_retry = 0;
-                ESP_LOGI(TAG, "Persisted previously dirty App binding");
-            } else {
-                next_binding_store_retry = now +
-                    pdMS_TO_TICKS(PB_BINDING_STORE_RETRY_INTERVAL_MS);
-                ESP_LOGW(TAG,
-                         "Binding persistence retry failed: %s",
-                         esp_err_to_name(err));
-            }
-        }
-
-        if (pb_timer_poll_finished(&timer)) {
-            if (!pb_overlay_active(&overlay)) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(pb_view_render(&current_binding.view));
-            }
-            if (network_err == ESP_OK && has_current_binding) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
-                    &event_queue,
-                    &current_binding,
-                    &timer,
-                    PB_TIMER_EVENT_FINISHED));
-                next_event_retry = 0;
-            }
-        } else if (pb_timer_active(&timer) && !pb_overlay_active(&overlay)) {
-            const uint32_t minutes =
-                (pb_timer_remaining_seconds(&timer) + 59U) / 60U;
-            if (minutes != timer.last_displayed_minutes) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(
-                    &timer,
-                    &current_binding.view));
-            }
-        }
-
-        if (pb_overlay_take_expired(&overlay)) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(
-                &timer,
-                &current_binding.view));
-        }
-
-        if (network_err == ESP_OK && wifi_connected() &&
-            pb_event_queue_count(&event_queue) > 0 &&
-            !event_request_in_flight &&
-            (next_event_retry == 0 ||
-             (int32_t)(now - next_event_retry) >= 0)) {
-            const pb_event_t *pending = pb_event_queue_peek(&event_queue);
-            const esp_err_t err = pb_network_worker_post_event(pending);
-            if (err == ESP_OK) {
-                event_request_in_flight = true;
-            } else {
-                ESP_LOGW(TAG,
-                         "Could not queue event delivery: %s",
-                         esp_err_to_name(err));
-                next_event_retry = now +
-                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
-            }
-        }
-
-        if (network_err == ESP_OK && wifi_connected() &&
-            !state_request_in_flight &&
-            (next_poll == 0 || (int32_t)(now - next_poll) >= 0)) {
-            const esp_err_t err = pb_network_worker_request_state();
-            if (err == ESP_OK) {
-                state_request_in_flight = true;
-                next_poll = now +
-                    pdMS_TO_TICKS(CONFIG_PB_POLL_INTERVAL_SECONDS * 1000);
-            } else {
-                ESP_LOGW(TAG,
-                         "Could not queue state request: %s",
-                         esp_err_to_name(err));
-                next_poll = now + pdMS_TO_TICKS(1000);
-            }
-        }
-
-        pb_input_event_t input_event;
-        if (!pb_hal_wait_input_event(&input_event, 100)) {
-            continue;
-        }
-        if (pb_action_from_control(input_event.control) == PB_ACTION_NONE) {
-            continue;
-        }
-
-        if (input_event.pressed) {
-            primary_pressed = true;
-            primary_pressed_at_ms = input_event.sampled_at_ms;
-            continue;
-        }
-        if (!primary_pressed) {
-            continue;
-        }
-
-        primary_pressed = false;
-        const uint32_t held_ms = input_event.sampled_at_ms >= primary_pressed_at_ms
-                                     ? (uint32_t)(input_event.sampled_at_ms -
-                                                  primary_pressed_at_ms)
-                                     : 0;
-        if (held_ms >= CONFIG_PB_PRIMARY_LONG_PRESS_MS) {
-            if (timer.status == PB_LOCAL_TIMER_RUNNING) {
-                ESP_LOGI(TAG, "Long action ignored while timer is running");
-                continue;
-            }
-            ESP_LOGI(TAG, "Action: primary_long (%" PRIu32 " ms)", held_ms);
-            if (network_err == ESP_OK && has_current_binding) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_action_event(
-                    &event_queue,
-                    &current_binding,
-                    PB_ACTION_PRIMARY_LONG));
-                next_event_retry = 0;
-            }
-        } else if (pb_timer_enabled(&timer)) {
-            const pb_timer_event_t event = pb_timer_toggle(&timer);
-            if (!pb_overlay_active(&overlay)) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(
-                    &timer,
-                    &current_binding.view));
-            }
-            if (network_err == ESP_OK && has_current_binding) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
-                    &event_queue,
-                    &current_binding,
-                    &timer,
-                    event));
-                next_event_retry = 0;
-            }
-        } else {
-            ESP_LOGI(TAG, "Action: primary");
-            if (network_err == ESP_OK && has_current_binding) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_action_event(
-                    &event_queue,
-                    &current_binding,
-                    PB_ACTION_PRIMARY));
-                next_event_retry = 0;
-            }
-        }
-
-        next_poll = xTaskGetTickCount() +
-                    pdMS_TO_TICKS(CONFIG_PB_POLL_INTERVAL_SECONDS * 1000);
-    }
+    ESP_ERROR_CHECK(pb_runtime_run());
 }

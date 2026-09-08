@@ -14,7 +14,7 @@
 
 - `sdk/old-panel/`：公开的前面板 SDK 与 LP Driver
 - `sdk/pb-hal/`：PB 通用硬件接口与 Old Panel Adapter
-- `sdk/pb-runtime/`：可复用的 View、Action、Timer、Overlay 与事件队列
+- `sdk/pb-runtime/`：PB Runtime Core、View、Action、Timer、Overlay 与事件队列
 - `profiles/`：硬件能力、Pinout 和验证记录
 - `apps/pb-runtime/`：运行在 ESP32 上的通用 PB Runtime
 - `sdk/pb-app-protocol/`：公开的 PB App Protocol
@@ -31,3 +31,15 @@ PB Runtime 是通用运行时，不包含 ONE 等具体 App 的业务逻辑。�
 - LP-003：康佳 SDC251，4 位七段显示、中间冒号与 7 键
 
 详细状态见 [Supported Hardware](docs/supported-hardware.md)。
+
+## PB Runtime 构建矩阵
+
+在已激活 ESP-IDF 环境的终端中运行：
+
+```powershell
+python tools/build-pb-runtime.py
+```
+
+该命令使用独立构建目录编译 LP-001 与 LP-003，并验证生成的 `sdkconfig` 确实采用了
+对应 Profile defaults。Wi-Fi 与 Cloud 凭据仍只从被 Git 忽略的
+`apps/pb-runtime/sdkconfig.secrets` 读取。

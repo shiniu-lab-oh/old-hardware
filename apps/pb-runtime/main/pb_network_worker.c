@@ -40,12 +40,12 @@ static void network_task(void *argument)
             continue;
         }
 
-        pb_network_result_t result = {0};
+        pb_runtime_transport_result_t result = {0};
         if (request.type == PB_NETWORK_REQUEST_STATE) {
-            result.type = PB_NETWORK_RESULT_STATE;
+            result.type = PB_RUNTIME_TRANSPORT_RESULT_STATE;
             result.error = pb_cloud_fetch_state(&s_cloud, &result.data.state);
         } else if (request.type == PB_NETWORK_REQUEST_EVENT) {
-            result.type = PB_NETWORK_RESULT_EVENT;
+            result.type = PB_RUNTIME_TRANSPORT_RESULT_EVENT;
             strlcpy(
                 result.data.event.event_id,
                 request.event.event_id,
@@ -78,7 +78,7 @@ esp_err_t pb_network_worker_start(const pb_cloud_config_t *config)
         sizeof(pb_network_request_t));
     s_result_queue = xQueueCreate(
         PB_NETWORK_QUEUE_LENGTH,
-        sizeof(pb_network_result_t));
+        sizeof(pb_runtime_transport_result_t));
     if (s_request_queue == NULL || s_result_queue == NULL) {
         if (s_request_queue != NULL) {
             vQueueDelete(s_request_queue);
@@ -140,7 +140,9 @@ esp_err_t pb_network_worker_post_event(const pb_event_t *event)
                : ESP_ERR_TIMEOUT;
 }
 
-bool pb_network_worker_receive(pb_network_result_t *result, uint32_t timeout_ms)
+bool pb_network_worker_receive(
+    pb_runtime_transport_result_t *result,
+    uint32_t timeout_ms)
 {
     return s_started && result != NULL &&
            xQueueReceive(s_result_queue, result, timeout_ticks(timeout_ms)) == pdPASS;

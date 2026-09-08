@@ -165,10 +165,10 @@ Capability 是硬件可兑现的契约，至少覆盖显示类型和范围、Log
 
 - `sdk/pb-hal` 已提供通用 Presentation、Capability、Input Event 和 Render Result，
   具体 Old Panel 调用只存在于 Adapter 中。
-- `sdk/pb-runtime` 已承载 View、Action、Timer、Overlay 与持久事件队列；这些模块不再
-  依赖 Old Panel SDK。
-- `apps/pb-runtime/main/main.c` 当前作为 Core Task，仍承担 Core 编排、网络请求调度和
-  Event 回执处理，后续可再抽成独立组件。
+- `sdk/pb-runtime` 已承载单写入者 Core 循环、View、Action、Timer、Overlay 与持久事件
+  队列；这些模块不依赖 Old Panel SDK、具体 Profile 或 HTTP 实现。
+- `apps/pb-runtime/main/main.c` 是 ESP-IDF 组装入口，只初始化 NVS、PB HAL、Wi-Fi 和
+  HTTP Worker，并通过非阻塞 Transport 回调连接 Runtime Core。
 - State 拉取和 Event 提交均由 Network Worker 执行，阻塞 HTTP 不再阻塞本地输入、
   Timer 和 Overlay 循环。
 - Worker 只接收持久队列头部 Event 的不可变副本；Core 校验回执 `event_id` 后才从

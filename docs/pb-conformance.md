@@ -34,7 +34,7 @@ Timer / Action Binding、一次性 Overlay、stale/conflict State、接口故障
 | 全部物理键 | PASS | PASS | NOT RUN |
 | Profile PRIMARY | PASS (KEY_6 / OK) | PASS (KEY_3 / OK) | NOT RUN |
 | Runtime + Cloud State | PASS | PASS | NOT RUN |
-| 固定测试 App 全流程 | NOT RUN | PARTIAL | NOT RUN |
+| 固定测试 App 全流程 | NOT RUN | PASS | NOT RUN |
 | 断网继续交互 | NOT RUN | PARTIAL (Event API) | NOT RUN |
 | 离线重启恢复 Binding | NOT RUN | PASS (State API 故障注入) | NOT RUN |
 | 运行中断电不伪造完成 | NOT RUN | NOT RUN | NOT RUN |
@@ -49,8 +49,9 @@ Runtime 0.3 已实现上述离线重启与事件归属所需的软件路径。�
 生命周期、Overlay、stale/conflict State 拒绝、Binding 切换和 Event API 故障后的 FIFO
 补发均通过。用户确认看到 `666` 闪烁并恢复 Timer View。State/Event API 关闭后软重启，
 Runtime 从 NVS 恢复 Timer Binding revision 5；用户确认面板稳定显示 `0007`，服务端事件
-数未变化。完整流程暂列 `PARTIAL`，等待补充 Action Binding `0008 -> 0009` 的视觉确认，
-以及真正的 Wi-Fi 断开和运行中断电测试。
+数未变化。完成 Core 组件拆分后再次烧录相同固件，用户确认 Action Binding 显示
+`0008`，PRIMARY 后更新为 `0009`。固定测试 App 流程标为 `PASS`；真正的 Wi-Fi 断开
+和运行中断电仍按独立 Local First 项记录，不计入该结论。
 
 LP-003 的详细证据见 `profiles/LP-003/validation.md`。第二种 VFD 在芯片、接线和能力完成
 逆向前保持 `NOT RUN`，不预设其显示和输入能力。
