@@ -106,6 +106,26 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 设备随后连入 Wi-Fi，并成功读取 Cloud State，日志包含 `app=one revision=11`。
 验证记录不保存 Wi-Fi 密码、Device Token 或其他 Secret。
 
+2026-09-08 使用公开 PB Conformance Mock Cloud 完成第一轮 Runtime 0.3 实机流程：
+
+- 在 COM3 写入 LP-003 Conformance 固件，Bootloader、分区表和 App 均通过 Hash 校验
+- Runtime 识别 `LP-003`、7 个物理键、1 个可控 LED，并成功获取测试 State
+- `OK`（物理按键 3）产生通用 PRIMARY 输入，Timer 的 started、paused、resumed、
+  finished 事件均成功入队、提交和确认
+- 用户确认看到 `666` 闪烁 Overlay，并在约 2.4 秒后恢复 Timer View
+- stale revision 被忽略；同 revision、不同 View 的冲突 State 被拒绝
+- Timer / Action Binding 在不重新烧录固件的情况下完成切换
+- Event API 返回 503 时，本地 Timer 继续运行；started 与 paused 保存在 NVS FIFO，
+  接口恢复后按原顺序补发并回到 0 pending
+- 补发事件保留 `pb.conformance.timer` 和产生时 revision 5，Mock Cloud 未发现重复事件
+- Action Binding 已在协议和 Runtime 日志层完成 `8 -> 9` 更新，物理显示仍待用户确认
+- State 与 Event API 同时返回 503 时软重启设备，Runtime 从 NVS 恢复
+  `pb.conformance.timer` revision 5，待发事件为 0
+- 用户确认重启后面板稳定显示 `0007`，没有闪烁或继续倒计时；Mock Cloud 事件数保持
+  13，未产生伪造的 Timer 生命周期事件
+- 恢复 State 与 Event API 后，Runtime 继续拉取 revision 5，事件数和重复数均未变化
+- 本轮未执行真正的 Wi-Fi 断开、设备断电或 Device Serial 切换
+
 ## 已验证矩阵
 
 | 项目 | 结果 | 证据 |
@@ -118,10 +138,16 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 | Runtime 构建 / 烧录 / 启动 | PASS | ESP-IDF v6.0.2 实机日志 |
 | Profile 独立构建配置 | PASS | 2026-09-08 全新构建与生成的 sdkconfig |
 | Cloud State 拉取 | PASS | `app=one revision=11` 日志 |
-| `OK` 作为 PRIMARY_ACTION | NOT RUN | 本 Profile 已固定为物理按键 3，待实机验收 |
+| `OK` 作为 PRIMARY_ACTION | PASS | 物理按键 3 已触发 Timer 与 Action 事件 |
+| `666` Overlay 后恢复 Timer | PASS | 用户视觉确认，Runtime revision 2 日志 |
+| Event API 故障后 FIFO 补发 | PASS | 2 pending 按 started、paused 顺序清空 |
+| stale / conflict State 拒绝 | PASS | Runtime 串口日志 |
+| Timer / Action Binding 热切换 | PARTIAL | 协议与日志通过，Action 数字待视觉确认 |
+| State API 故障时重启恢复 Binding | PASS | NVS 恢复 revision 5，用户确认稳定显示 `0007` |
+| 重启不伪造 Timer 事件 | PASS | 重启前后 Mock Cloud 事件数保持 13 |
 | hello-panel 完整流程 | NOT RUN | 待实机验收 |
 | factory-test 完整流程 | NOT RUN | 待实机验收 |
-| 断网 Local First 流程 | NOT RUN | Runtime Core 重构阶段验收 |
+| 断网 Local First 流程 | PARTIAL | Event API 故障通过，真正 Wi-Fi 断开待测 |
 
 ## 未完成项
 
