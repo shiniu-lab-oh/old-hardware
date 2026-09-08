@@ -66,6 +66,14 @@ CONFIG_PB_PRIMARY_KEY_INDEX=3
 - 1 MiB 应用分区仍剩余 12%
 - 本轮同样未烧录设备
 
+2026-09-08 完成 Network Worker 接入后的 LP-003 增量构建：
+
+- State 拉取与 Event 提交已从 Core 本地循环迁入独立 Worker
+- Event 以不可变副本发送，Core 按 `event_id` 确认后再更新持久队列
+- `pb_runtime.bin` 大小为 `0xe2890` bytes
+- 1 MiB 应用分区仍剩余 12%
+- 本轮仅验证构建，没有烧录设备
+
 2026-09-07 已完成 PB Runtime 全量构建和 COM5 烧录，写入校验通过。
 启动日志确认：
 

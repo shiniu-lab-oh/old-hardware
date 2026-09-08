@@ -14,9 +14,9 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "pb_actions.h"
-#include "pb_cloud.h"
 #include "pb_event_queue.h"
 #include "pb_hal.h"
+#include "pb_network_worker.h"
 #include "pb_overlay.h"
 #include "pb_timer.h"
 #include "pb_view.h"
@@ -135,8 +135,10 @@ static esp_err_t render_current(
     return pb_view_render(&timer_view);
 }
 
-static esp_err_t sync_view(
-    pb_cloud_t *cloud,
+static esp_err_t apply_state(
+    const pb_app_state_t *next_state,
+    const char *cloud_base_url,
+    const char *device_serial,
     pb_view_t *current_view,
     uint64_t *current_revision,
     bool *has_current_revision,
@@ -144,23 +146,17 @@ static esp_err_t sync_view(
     pb_overlay_t *overlay
 )
 {
-    pb_app_state_t next_state;
-    esp_err_t err = pb_cloud_fetch_state(cloud, &next_state);
-    if (err != ESP_OK) {
-        return err;
-    }
-
-    if (*has_current_revision && next_state.revision < *current_revision) {
+    if (*has_current_revision && next_state->revision < *current_revision) {
         ESP_LOGW(TAG,
                  "Ignoring stale state revision=%" PRIu64 " current=%" PRIu64,
-                 next_state.revision,
+                 next_state->revision,
                  *current_revision);
         return ESP_OK;
     }
 
     const bool timer_was_active = pb_timer_active(timer);
-    pb_timer_configure(timer, &next_state.timer);
-    if (*has_current_revision && next_state.revision == *current_revision) {
+    pb_timer_configure(timer, &next_state->timer);
+    if (*has_current_revision && next_state->revision == *current_revision) {
         if (timer_was_active && !pb_timer_active(timer) &&
             !pb_overlay_active(overlay)) {
             return pb_view_render(current_view);
@@ -169,24 +165,24 @@ static esp_err_t sync_view(
         return ESP_OK;
     }
 
-    *current_view = next_state.view;
-    *current_revision = next_state.revision;
+    *current_view = next_state->view;
+    *current_revision = next_state->revision;
     *has_current_revision = true;
-    err = pb_view_store_last(
-        cloud->config.base_url,
-        cloud->config.device_serial,
+    esp_err_t err = pb_view_store_last(
+        cloud_base_url,
+        device_serial,
         current_view,
         *current_revision);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Could not store last view: %s", esp_err_to_name(err));
     }
 
-    if (next_state.overlay.enabled) {
+    if (next_state->overlay.enabled) {
         return pb_overlay_show_code(
             overlay,
-            next_state.overlay.value,
-            next_state.overlay.duration_ms,
-            next_state.overlay.blink);
+            next_state->overlay.value,
+            next_state->overlay.duration_ms,
+            next_state->overlay.blink);
     }
     if (!pb_overlay_active(overlay)) {
         return render_current(timer, current_view);
@@ -247,45 +243,6 @@ static esp_err_t enqueue_action_event(
     return ESP_OK;
 }
 
-static esp_err_t flush_pending_events(
-    pb_event_queue_t *queue,
-    pb_cloud_t *cloud
-)
-{
-    if (!wifi_connected()) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    const pb_event_t *event;
-    while ((event = pb_event_queue_peek(queue)) != NULL) {
-        uint64_t revision;
-        esp_err_t err = pb_cloud_post_event(cloud, event, &revision);
-        if (err != ESP_OK) {
-            ESP_LOGW(TAG,
-                     "Event %s delivery failed; retained for retry: %s",
-                     event->event_id,
-                     esp_err_to_name(err));
-            return err;
-        }
-
-        char delivered_id[PB_EVENT_ID_LENGTH + 1];
-        strlcpy(delivered_id, event->event_id, sizeof(delivered_id));
-        err = pb_event_queue_pop(queue);
-        if (err != ESP_OK) {
-            ESP_LOGE(TAG,
-                     "Event %s acknowledged but could not be removed: %s",
-                     delivered_id,
-                     esp_err_to_name(err));
-            return err;
-        }
-        ESP_LOGI(TAG,
-                 "Delivered event %s (%u pending)",
-                 delivered_id,
-                 (unsigned)pb_event_queue_count(queue));
-    }
-    return ESP_OK;
-}
-
 void app_main(void)
 {
     ESP_ERROR_CHECK(init_nvs());
@@ -332,10 +289,9 @@ void app_main(void)
         .firmware_version = PB_RUNTIME_VERSION,
         .timeout_ms = CONFIG_PB_HTTP_TIMEOUT_MS,
     };
-    pb_cloud_t cloud;
-    const esp_err_t cloud_err = pb_cloud_init(&cloud, &cloud_config);
+    const esp_err_t network_err = pb_network_worker_start(&cloud_config);
     const esp_err_t wifi_err = start_wifi();
-    if (cloud_err != ESP_OK || wifi_err != ESP_OK) {
+    if (network_err != ESP_OK || wifi_err != ESP_OK) {
         ESP_LOGE(TAG,
                  "Runtime configuration incomplete; set Wi-Fi, Cloud URL and token via menuconfig or sdkconfig.secrets");
     }
@@ -353,11 +309,89 @@ void app_main(void)
 
     TickType_t next_poll = 0;
     TickType_t next_event_retry = 0;
+    bool state_request_in_flight = false;
+    bool event_request_in_flight = false;
     bool primary_pressed = false;
     uint64_t primary_pressed_at_ms = 0;
 
     while (true) {
         const TickType_t now = xTaskGetTickCount();
+
+        pb_network_result_t network_result;
+        while (network_err == ESP_OK &&
+               pb_network_worker_receive(&network_result, 0)) {
+            if (network_result.type == PB_NETWORK_RESULT_STATE) {
+                state_request_in_flight = false;
+                if (network_result.error != ESP_OK) {
+                    ESP_LOGW(TAG,
+                             "State sync failed; keeping local state: %s",
+                             esp_err_to_name(network_result.error));
+                    continue;
+                }
+
+                const esp_err_t err = apply_state(
+                    &network_result.data.state,
+                    CONFIG_PB_CLOUD_BASE_URL,
+                    CONFIG_PB_DEVICE_SERIAL,
+                    &current_view,
+                    &current_revision,
+                    &has_current_revision,
+                    &timer,
+                    &overlay);
+                if (err != ESP_OK) {
+                    ESP_LOGW(TAG,
+                             "State apply failed; keeping local state: %s",
+                             esp_err_to_name(err));
+                }
+                continue;
+            }
+
+            if (network_result.type != PB_NETWORK_RESULT_EVENT) {
+                ESP_LOGE(TAG,
+                         "Ignoring unknown network result type: %d",
+                         (int)network_result.type);
+                continue;
+            }
+
+            event_request_in_flight = false;
+            const pb_event_t *pending = pb_event_queue_peek(&event_queue);
+            if (network_result.error != ESP_OK) {
+                ESP_LOGW(TAG,
+                         "Event %s delivery failed; retained for retry: %s",
+                         network_result.data.event.event_id,
+                         esp_err_to_name(network_result.error));
+                next_event_retry = now +
+                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
+                continue;
+            }
+            if (pending == NULL ||
+                strcmp(pending->event_id, network_result.data.event.event_id) != 0) {
+                ESP_LOGE(TAG,
+                         "Unexpected event acknowledgement: %s",
+                         network_result.data.event.event_id);
+                next_event_retry = now +
+                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
+                continue;
+            }
+
+            const esp_err_t err = pb_event_queue_pop(&event_queue);
+            if (err != ESP_OK) {
+                ESP_LOGE(TAG,
+                         "Event %s acknowledged but could not be removed: %s",
+                         network_result.data.event.event_id,
+                         esp_err_to_name(err));
+                next_event_retry = now +
+                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
+                continue;
+            }
+            ESP_LOGI(TAG,
+                     "Delivered event %s at revision=%" PRIu64 " (%u pending)",
+                     network_result.data.event.event_id,
+                     network_result.data.event.revision,
+                     (unsigned)pb_event_queue_count(&event_queue));
+            next_event_retry = 0;
+            next_poll = 0;
+        }
 
         if (s_offline_overlay_pending) {
             s_offline_overlay_pending = false;
@@ -369,7 +403,7 @@ void app_main(void)
             if (!pb_overlay_active(&overlay)) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(pb_view_render(&current_view));
             }
-            if (cloud_err == ESP_OK) {
+            if (network_err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
                     &event_queue, &timer, PB_TIMER_EVENT_FINISHED));
                 next_event_retry = 0;
@@ -386,36 +420,38 @@ void app_main(void)
             ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
         }
 
-        if (cloud_err == ESP_OK && wifi_connected() &&
+        if (network_err == ESP_OK && wifi_connected() &&
             pb_event_queue_count(&event_queue) > 0 &&
+            !event_request_in_flight &&
             (next_event_retry == 0 ||
              (int32_t)(now - next_event_retry) >= 0)) {
-            const esp_err_t err = flush_pending_events(&event_queue, &cloud);
+            const pb_event_t *pending = pb_event_queue_peek(&event_queue);
+            const esp_err_t err = pb_network_worker_post_event(pending);
             if (err == ESP_OK) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(sync_view(
-                    &cloud,
-                    &current_view,
-                    &current_revision,
-                    &has_current_revision,
-                    &timer,
-                    &overlay));
+                event_request_in_flight = true;
+            } else {
+                ESP_LOGW(TAG,
+                         "Could not queue event delivery: %s",
+                         esp_err_to_name(err));
+                next_event_retry = now +
+                    pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
             }
-            next_event_retry = now + pdMS_TO_TICKS(PB_EVENT_RETRY_INTERVAL_MS);
         }
 
-        if (cloud_err == ESP_OK && wifi_connected() &&
+        if (network_err == ESP_OK && wifi_connected() &&
+            !state_request_in_flight &&
             (next_poll == 0 || (int32_t)(now - next_poll) >= 0)) {
-            const esp_err_t err = sync_view(
-                &cloud,
-                &current_view,
-                &current_revision,
-                &has_current_revision,
-                &timer,
-                &overlay);
-            if (err != ESP_OK) {
-                ESP_LOGW(TAG, "State sync failed; keeping local state");
+            const esp_err_t err = pb_network_worker_request_state();
+            if (err == ESP_OK) {
+                state_request_in_flight = true;
+                next_poll = now +
+                    pdMS_TO_TICKS(CONFIG_PB_POLL_INTERVAL_SECONDS * 1000);
+            } else {
+                ESP_LOGW(TAG,
+                         "Could not queue state request: %s",
+                         esp_err_to_name(err));
+                next_poll = now + pdMS_TO_TICKS(1000);
             }
-            next_poll = now + pdMS_TO_TICKS(CONFIG_PB_POLL_INTERVAL_SECONDS * 1000);
         }
 
         pb_input_event_t input_event;
@@ -446,7 +482,7 @@ void app_main(void)
                 continue;
             }
             ESP_LOGI(TAG, "Action: primary_long (%" PRIu32 " ms)", held_ms);
-            if (cloud_err == ESP_OK) {
+            if (network_err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_action_event(
                     &event_queue, PB_ACTION_PRIMARY_LONG));
                 next_event_retry = 0;
@@ -456,14 +492,14 @@ void app_main(void)
             if (!pb_overlay_active(&overlay)) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
             }
-            if (cloud_err == ESP_OK) {
+            if (network_err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
                     &event_queue, &timer, event));
                 next_event_retry = 0;
             }
         } else {
             ESP_LOGI(TAG, "Action: primary");
-            if (cloud_err == ESP_OK) {
+            if (network_err == ESP_OK) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_action_event(
                     &event_queue, PB_ACTION_PRIMARY));
                 next_event_retry = 0;

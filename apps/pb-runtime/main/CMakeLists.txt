@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "main.c"
         "pb_cloud.c"
+        "pb_network_worker.c"
     INCLUDE_DIRS "."
     REQUIRES
         pb-hal

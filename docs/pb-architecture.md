@@ -167,9 +167,12 @@ Capability 是硬件可兑现的契约，至少覆盖显示类型和范围、Log
   具体 Old Panel 调用只存在于 Adapter 中。
 - `sdk/pb-runtime` 已承载 View、Action、Timer、Overlay 与持久事件队列；这些模块不再
   依赖 Old Panel SDK。
-- `apps/pb-runtime/main/main.c` 仍承担 Core 编排、同步调度和事件刷新，尚未形成独立
-  Core Task。
-- HTTP State 拉取和 Event 提交仍可能阻塞本地循环。
+- `apps/pb-runtime/main/main.c` 当前作为 Core Task，仍承担 Core 编排、网络请求调度和
+  Event 回执处理，后续可再抽成独立组件。
+- State 拉取和 Event 提交均由 Network Worker 执行，阻塞 HTTP 不再阻塞本地输入、
+  Timer 和 Overlay 循环。
+- Worker 只接收持久队列头部 Event 的不可变副本；Core 校验回执 `event_id` 后才从
+  持久队列出队，失败、断网和异常回执均保留原事件。
 - Driver 输入事件已经带有消抖完成时的单调采样时间。
 - NVS 主要保存 View 与 revision，Binding 和完整 Timer 配置尚未持久化。
 - Duration 呈现仍由 Runtime 固定转换为分钟数字。
