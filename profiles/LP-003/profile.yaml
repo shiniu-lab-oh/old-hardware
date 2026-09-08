@@ -1,0 +1,161 @@
+id: LP-003
+
+category: tv_set_top_box_front_panel
+
+original_hardware:
+  brand: "康佳"
+  model: "SDC251"
+  type: "digital_tv_set_top_box"
+
+connector:
+  name: J1
+  pin_count: 8
+
+capabilities:
+  display:
+    type: seven_segment
+    digits: 4
+    colon: true
+    decimal_point: false
+    controller_marking: "CT1668"
+    protocol_compatibility: "TM1668-compatible subset"
+    ram_addresses:
+      digit_1: 0xC0
+      digit_2: 0xC2
+      digit_3: 0xC4
+      digit_4: 0xC6
+      colon: "0xC2 bit7"
+    segment_mapping:
+      bit0: A
+      bit1: B
+      bit2: C
+      bit3: D
+      bit4: E
+      bit5: F
+      bit6: G
+
+  leds:
+    physical_count: 2
+    controllable_count: 1
+    items:
+      - color: red
+        controllable: false
+        connection: hard_wired_power
+      - color: green
+        controllable: true
+        sdk_index: 0
+        signal: GREEN_LED_CTRL
+        active: high
+
+  keys:
+    count: 7
+    mapping:
+      - id: 1
+        sdk_key: OLD_PANEL_KEY_1
+        original_label: MENU
+        raw: "byte1 bit4"
+      - id: 2
+        sdk_key: OLD_PANEL_KEY_2
+        original_label: EXIT
+        raw: "byte1 bit3"
+      - id: 3
+        sdk_key: OLD_PANEL_KEY_3
+        original_label: OK
+        raw: "byte1 bit0"
+      - id: 4
+        sdk_key: OLD_PANEL_KEY_4
+        original_label: VOL-
+        raw: "byte0 bit1"
+      - id: 5
+        sdk_key: OLD_PANEL_KEY_5
+        original_label: VOL+
+        raw: "byte0 bit0"
+      - id: 6
+        sdk_key: OLD_PANEL_KEY_6
+        original_label: CH-
+        raw: "byte0 bit3"
+      - id: 7
+        sdk_key: OLD_PANEL_KEY_7
+        original_label: CH+
+        raw: "byte0 bit4"
+
+  infrared:
+    present: true
+    supported: false
+
+  card_slot:
+    present: null
+    supported: false
+
+interface:
+  signals:
+    - pin: 1
+      name: STB
+      esp32_gpio: 25
+      direction: output
+      notes: "PCB path includes approximately 100 ohms"
+    - pin: 2
+      name: GND
+      direction: ground
+    - pin: 3
+      name: CLK
+      esp32_gpio: 26
+      direction: output
+    - pin: 4
+      name: DIO
+      esp32_gpio: 27
+      direction: bidirectional
+    - pin: 5
+      name: IR_OUT
+      esp32_gpio: 32
+      direction: input
+      notes: "Input only; decoding disabled"
+    - pin: 6
+      name: GREEN_LED_CTRL
+      esp32_gpio: 33
+      direction: output
+      active: high
+    - pin: 7
+      name: GND
+      direction: ground
+    - pin: 8
+      name: VDD
+      voltage: 3.3V
+      direction: power
+
+controller:
+  platform: ESP32
+
+software:
+  framework: ESP-IDF
+  sdk: Old Panel SDK
+  driver: lp003
+
+driver:
+  name: lp003
+  sdk: old-panel
+  status: development
+
+pb_runtime:
+  primary_key_index: 3
+  primary_key_original_label: OK
+
+status:
+  pinout: mapped
+  reverse_engineered: true
+  display_verified: true
+  leds_verified: true
+  keys_verified: true
+  sdk_integrated: true
+  pb_runtime_smoke_tested: true
+  sdk_verified: false
+  production_ready: false
+
+photos:
+  panel: null
+  pinout: null
+
+notes:
+  - "CT1668 尚未确认与 TM1668 完全兼容；Driver 只承诺当前实测子集。"
+  - "小数点未观察到可见响应，不作为当前能力暴露。"
+  - "Pinout 标准图片和 hello-panel / factory-test 的 LP-003 完整验收仍待完成。"
