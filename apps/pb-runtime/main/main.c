@@ -300,7 +300,10 @@ void app_main(void)
     ESP_ERROR_CHECK(init_nvs());
 
     static pb_event_queue_t event_queue;
-    ESP_ERROR_CHECK(pb_event_queue_init(&event_queue));
+    ESP_ERROR_CHECK(pb_event_queue_init(
+        &event_queue,
+        CONFIG_PB_CLOUD_BASE_URL,
+        CONFIG_PB_DEVICE_SERIAL));
 
     const pb_hal_config_t panel_config = {
         .profile_id = CONFIG_PB_PANEL_PROFILE,

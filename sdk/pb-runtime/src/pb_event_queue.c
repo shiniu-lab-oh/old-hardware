@@ -8,18 +8,30 @@
 #include "esp_log.h"
 #include "esp_random.h"
 #include "nvs.h"
+#include "pb_binding.h"
+#include "pb_source.h"
+#include "pb_view.h"
 
-#define PB_EVENT_QUEUE_SCHEMA_VERSION 2U
+#define PB_EVENT_QUEUE_SCHEMA_VERSION 3U
 #define PB_EVENT_QUEUE_NAMESPACE "pb_events"
-#define PB_EVENT_QUEUE_KEY "pending"
+#define PB_EVENT_QUEUE_LEGACY_KEY "pending"
+#define PB_EVENT_QUEUE_QUARANTINE_KEY "legacy_blocked"
+#define PB_EVENT_QUEUE_KEY_CAPACITY 16
+#define PB_EVENT_QUEUE_KEY_HASH_MASK UINT64_C(0x00ffffffffffffff)
 #define PB_MIN_VALID_UNIX_TIME 1577836800LL
 
 static const char *TAG = "pb_event_queue";
 
 typedef struct {
     uint32_t schema_version;
+    uint64_t source_hash;
     pb_event_queue_t queue;
 } stored_event_queue_t;
+
+typedef struct {
+    uint32_t schema_version;
+    pb_event_queue_t queue;
+} stored_event_queue_v2_t;
 
 typedef struct {
     char event_id[PB_EVENT_ID_LENGTH + 1];
@@ -42,8 +54,12 @@ typedef struct {
 } stored_event_queue_v1_t;
 
 static stored_event_queue_t s_stored_queue;
+static stored_event_queue_v2_t s_stored_queue_v2;
 static stored_event_queue_v1_t s_stored_queue_v1;
 static pb_event_queue_t s_next_queue;
+static char s_queue_key[PB_EVENT_QUEUE_KEY_CAPACITY];
+static uint64_t s_source_hash;
+static bool s_source_initialized;
 
 static bool event_valid(const pb_event_t *event)
 {
@@ -68,6 +84,9 @@ static bool event_valid(const pb_event_t *event)
 
 static esp_err_t store_queue(const pb_event_queue_t *queue)
 {
+    if (!s_source_initialized) {
+        return ESP_ERR_INVALID_STATE;
+    }
     nvs_handle_t handle;
     esp_err_t err = nvs_open(PB_EVENT_QUEUE_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
@@ -75,10 +94,11 @@ static esp_err_t store_queue(const pb_event_queue_t *queue)
     }
 
     s_stored_queue.schema_version = PB_EVENT_QUEUE_SCHEMA_VERSION;
+    s_stored_queue.source_hash = s_source_hash;
     s_stored_queue.queue = *queue;
     err = nvs_set_blob(
         handle,
-        PB_EVENT_QUEUE_KEY,
+        s_queue_key,
         &s_stored_queue,
         sizeof(s_stored_queue));
     if (err == ESP_OK) {
@@ -88,14 +108,14 @@ static esp_err_t store_queue(const pb_event_queue_t *queue)
     return err;
 }
 
-static esp_err_t clear_stored_queue(void)
+static esp_err_t erase_stored_queue(const char *key)
 {
     nvs_handle_t handle;
     esp_err_t err = nvs_open(PB_EVENT_QUEUE_NAMESPACE, NVS_READWRITE, &handle);
     if (err != ESP_OK) {
         return err;
     }
-    err = nvs_erase_key(handle, PB_EVENT_QUEUE_KEY);
+    err = nvs_erase_key(handle, key);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         err = ESP_OK;
     }
@@ -104,6 +124,65 @@ static esp_err_t clear_stored_queue(void)
     }
     nvs_close(handle);
     return err;
+}
+
+static esp_err_t quarantine_legacy_queue(void)
+{
+    nvs_handle_t handle;
+    esp_err_t err = nvs_open(PB_EVENT_QUEUE_NAMESPACE, NVS_READWRITE, &handle);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = nvs_set_u8(handle, PB_EVENT_QUEUE_QUARANTINE_KEY, 1U);
+    if (err == ESP_OK) {
+        err = nvs_commit(handle);
+    }
+    nvs_close(handle);
+    return err;
+}
+
+static esp_err_t make_queue_key(uint64_t source_hash)
+{
+    const int written = snprintf(
+        s_queue_key,
+        sizeof(s_queue_key),
+        "q%014" PRIx64,
+        source_hash & PB_EVENT_QUEUE_KEY_HASH_MASK);
+    return written == (PB_EVENT_QUEUE_KEY_CAPACITY - 1)
+               ? ESP_OK
+               : ESP_ERR_INVALID_SIZE;
+}
+
+static bool queue_valid(const pb_event_queue_t *queue)
+{
+    if (queue == NULL || queue->count > PB_EVENT_QUEUE_CAPACITY) {
+        return false;
+    }
+    for (uint32_t index = 0; index < queue->count; ++index) {
+        if (!event_valid(&queue->items[index])) {
+            return false;
+        }
+    }
+    return true;
+}
+
+static bool legacy_source_matches(
+    const char *cloud_base_url,
+    const char *device_serial
+)
+{
+    pb_binding_t binding;
+    if (pb_binding_load(cloud_base_url, device_serial, &binding) == ESP_OK) {
+        return true;
+    }
+
+    pb_view_t view;
+    uint64_t revision;
+    return pb_view_load_last(
+               cloud_base_url,
+               device_serial,
+               &view,
+               &revision) == ESP_OK;
 }
 
 static int64_t current_unix_time(void)
@@ -141,15 +220,27 @@ static esp_err_t initialize_event(pb_event_t *event, pb_event_type_t type)
     return make_event_id(event->event_id);
 }
 
-esp_err_t pb_event_queue_init(pb_event_queue_t *queue)
+esp_err_t pb_event_queue_init(
+    pb_event_queue_t *queue,
+    const char *cloud_base_url,
+    const char *device_serial
+)
 {
-    if (queue == NULL) {
+    if (queue == NULL || cloud_base_url == NULL || cloud_base_url[0] == '\0' ||
+        device_serial == NULL || device_serial[0] == '\0') {
         return ESP_ERR_INVALID_ARG;
     }
     memset(queue, 0, sizeof(*queue));
+    s_source_initialized = false;
+    s_source_hash = pb_source_hash(cloud_base_url, device_serial);
+    esp_err_t err = make_queue_key(s_source_hash);
+    if (err != ESP_OK) {
+        return err;
+    }
+    s_source_initialized = true;
 
     nvs_handle_t handle;
-    esp_err_t err = nvs_open(PB_EVENT_QUEUE_NAMESPACE, NVS_READONLY, &handle);
+    err = nvs_open(PB_EVENT_QUEUE_NAMESPACE, NVS_READONLY, &handle);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         return ESP_OK;
     }
@@ -158,7 +249,47 @@ esp_err_t pb_event_queue_init(pb_event_queue_t *queue)
     }
 
     size_t size = 0;
-    err = nvs_get_blob(handle, PB_EVENT_QUEUE_KEY, NULL, &size);
+    err = nvs_get_blob(handle, s_queue_key, NULL, &size);
+    if (err == ESP_OK) {
+        if (size != sizeof(s_stored_queue)) {
+            nvs_close(handle);
+            ESP_LOGW(TAG, "Discarding an invalid source event queue");
+            return erase_stored_queue(s_queue_key);
+        }
+
+        err = nvs_get_blob(
+            handle,
+            s_queue_key,
+            &s_stored_queue,
+            &size);
+        nvs_close(handle);
+        if (err != ESP_OK) {
+            return err;
+        }
+        if (s_stored_queue.source_hash != s_source_hash) {
+            ESP_LOGE(TAG, "Event queue source key collision detected");
+            s_source_initialized = false;
+            return ESP_ERR_INVALID_STATE;
+        }
+        if (s_stored_queue.schema_version != PB_EVENT_QUEUE_SCHEMA_VERSION ||
+            !queue_valid(&s_stored_queue.queue)) {
+            ESP_LOGW(TAG, "Discarding an invalid source event queue");
+            return erase_stored_queue(s_queue_key);
+        }
+
+        *queue = s_stored_queue.queue;
+        ESP_LOGI(TAG,
+                 "Loaded %" PRIu32 " pending event(s) for this device source",
+                 queue->count);
+        return ESP_OK;
+    }
+    if (err != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        return err;
+    }
+
+    size = 0;
+    err = nvs_get_blob(handle, PB_EVENT_QUEUE_LEGACY_KEY, NULL, &size);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
         nvs_close(handle);
         return ESP_OK;
@@ -168,29 +299,39 @@ esp_err_t pb_event_queue_init(pb_event_queue_t *queue)
         return err;
     }
 
+    uint8_t legacy_quarantined = 0;
+    err = nvs_get_u8(
+        handle,
+        PB_EVENT_QUEUE_QUARANTINE_KEY,
+        &legacy_quarantined);
+    if (err != ESP_OK && err != ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
+        return err;
+    }
+    if (legacy_quarantined != 0) {
+        nvs_close(handle);
+        ESP_LOGW(TAG, "Legacy pending events remain quarantined");
+        return ESP_OK;
+    }
+
     bool valid = false;
-    bool migrated = false;
-    if (size == sizeof(s_stored_queue)) {
+    bool missing_app_context = false;
+    if (size == sizeof(s_stored_queue_v2)) {
         err = nvs_get_blob(
             handle,
-            PB_EVENT_QUEUE_KEY,
-            &s_stored_queue,
+            PB_EVENT_QUEUE_LEGACY_KEY,
+            &s_stored_queue_v2,
             &size);
         valid = err == ESP_OK &&
-                s_stored_queue.schema_version == PB_EVENT_QUEUE_SCHEMA_VERSION &&
-                s_stored_queue.queue.count <= PB_EVENT_QUEUE_CAPACITY;
-        for (uint32_t index = 0;
-             valid && index < s_stored_queue.queue.count;
-             ++index) {
-            valid = event_valid(&s_stored_queue.queue.items[index]);
-        }
+                s_stored_queue_v2.schema_version == 2U &&
+                queue_valid(&s_stored_queue_v2.queue);
         if (valid) {
-            *queue = s_stored_queue.queue;
+            *queue = s_stored_queue_v2.queue;
         }
     } else if (size == sizeof(s_stored_queue_v1)) {
         err = nvs_get_blob(
             handle,
-            PB_EVENT_QUEUE_KEY,
+            PB_EVENT_QUEUE_LEGACY_KEY,
             &s_stored_queue_v1,
             &size);
         valid = err == ESP_OK && s_stored_queue_v1.schema_version == 1U &&
@@ -215,24 +356,48 @@ esp_err_t pb_event_queue_init(pb_event_queue_t *queue)
             target->remaining_seconds = source->remaining_seconds;
             valid = event_valid(target);
         }
-        migrated = valid;
+        missing_app_context = valid;
     }
     nvs_close(handle);
 
     if (!valid) {
         ESP_LOGW(TAG, "Discarding an invalid persisted event queue");
-        return clear_stored_queue();
+        memset(queue, 0, sizeof(*queue));
+        return erase_stored_queue(PB_EVENT_QUEUE_LEGACY_KEY);
     }
 
-    if (migrated) {
+    if (queue->count == 0) {
+        return erase_stored_queue(PB_EVENT_QUEUE_LEGACY_KEY);
+    }
+
+    if (!legacy_source_matches(cloud_base_url, device_serial)) {
+        ESP_LOGW(TAG,
+                 "Legacy pending events remain quarantined because their source "
+                 "cannot be verified");
+        memset(queue, 0, sizeof(*queue));
+        return quarantine_legacy_queue();
+    }
+
+    if (missing_app_context) {
         ESP_LOGW(TAG,
                  "Migrated pending events without App context; compatibility routing applies");
-        err = store_queue(queue);
-        if (err != ESP_OK) {
+    }
+    err = store_queue(queue);
+    if (err != ESP_OK) {
+        return err;
+    }
+    err = erase_stored_queue(PB_EVENT_QUEUE_LEGACY_KEY);
+    if (err != ESP_OK) {
+        const esp_err_t quarantine_err = quarantine_legacy_queue();
+        if (quarantine_err != ESP_OK) {
             return err;
         }
+        ESP_LOGW(TAG,
+                 "Migrated events, but the legacy queue could only be quarantined");
     }
-    ESP_LOGI(TAG, "Loaded %" PRIu32 " pending event(s)", queue->count);
+    ESP_LOGI(TAG,
+             "Migrated %" PRIu32 " pending event(s) to this device source",
+             queue->count);
     return ESP_OK;
 }
 

@@ -4,6 +4,7 @@ idf_component_register(
         "src/pb_binding.c"
         "src/pb_event_queue.c"
         "src/pb_overlay.c"
+        "src/pb_source.c"
         "src/pb_timer.c"
         "src/pb_view.c"
     INCLUDE_DIRS

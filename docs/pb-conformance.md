@@ -34,6 +34,7 @@
 | 离线重启恢复 Binding | NOT RUN | NOT RUN | NOT RUN |
 | 运行中断电不伪造完成 | NOT RUN | NOT RUN | NOT RUN |
 | 离线事件按原 Binding 补发 | NOT RUN | NOT RUN | NOT RUN |
+| Cloud / Device 身份切换不串发事件 | NOT RUN | NOT RUN | NOT RUN |
 
 Runtime 0.3 已实现上述离线重启与事件归属所需的软件路径，但在完成断网、断电和 App
 切换实机流程前，矩阵状态继续保持 `NOT RUN`。

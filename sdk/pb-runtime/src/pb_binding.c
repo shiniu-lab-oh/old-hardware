@@ -3,12 +3,11 @@
 #include <string.h>
 
 #include "nvs.h"
+#include "pb_source.h"
 #include "pb_view.h"
 
 #define PB_BINDING_STORE_MAGIC 0x50424231U
 #define PB_BINDING_STORE_VERSION 1U
-#define PB_BINDING_SOURCE_HASH_OFFSET UINT64_C(14695981039346656037)
-#define PB_BINDING_SOURCE_HASH_PRIME UINT64_C(1099511628211)
 
 typedef struct {
     uint32_t magic;
@@ -16,25 +15,6 @@ typedef struct {
     uint64_t source_hash;
     pb_binding_t binding;
 } pb_binding_store_t;
-
-static uint64_t source_hash(const char *cloud_base_url, const char *device_serial)
-{
-    uint64_t hash = PB_BINDING_SOURCE_HASH_OFFSET;
-    const char *parts[] = {cloud_base_url, device_serial};
-
-    for (size_t part = 0; part < sizeof(parts) / sizeof(parts[0]); ++part) {
-        for (const unsigned char *cursor = (const unsigned char *)parts[part];
-             *cursor != '\0';
-             ++cursor) {
-            hash ^= *cursor;
-            hash *= PB_BINDING_SOURCE_HASH_PRIME;
-        }
-        hash ^= 0xffU;
-        hash *= PB_BINDING_SOURCE_HASH_PRIME;
-    }
-
-    return hash;
-}
 
 static bool view_valid(const pb_view_t *view)
 {
@@ -194,7 +174,7 @@ esp_err_t pb_binding_load(
     if (size != sizeof(stored) ||
         stored.magic != PB_BINDING_STORE_MAGIC ||
         stored.version != PB_BINDING_STORE_VERSION ||
-        stored.source_hash != source_hash(cloud_base_url, device_serial) ||
+        stored.source_hash != pb_source_hash(cloud_base_url, device_serial) ||
         !binding_valid(&stored.binding)) {
         return ESP_ERR_INVALID_VERSION;
     }
@@ -224,7 +204,7 @@ esp_err_t pb_binding_store(
     const pb_binding_store_t stored = {
         .magic = PB_BINDING_STORE_MAGIC,
         .version = PB_BINDING_STORE_VERSION,
-        .source_hash = source_hash(cloud_base_url, device_serial),
+        .source_hash = pb_source_hash(cloud_base_url, device_serial),
         .binding = *binding,
     };
     err = nvs_set_blob(handle, "binding", &stored, sizeof(stored));

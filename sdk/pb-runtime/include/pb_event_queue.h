@@ -14,7 +14,11 @@ typedef struct {
     pb_event_t items[PB_EVENT_QUEUE_CAPACITY];
 } pb_event_queue_t;
 
-esp_err_t pb_event_queue_init(pb_event_queue_t *queue);
+esp_err_t pb_event_queue_init(
+    pb_event_queue_t *queue,
+    const char *cloud_base_url,
+    const char *device_serial
+);
 size_t pb_event_queue_count(const pb_event_queue_t *queue);
 const pb_event_t *pb_event_queue_peek(const pb_event_queue_t *queue);
 esp_err_t pb_event_queue_enqueue(pb_event_queue_t *queue, const pb_event_t *event);

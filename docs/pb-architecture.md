@@ -179,7 +179,9 @@ Capability 是硬件可兑现的契约，至少覆盖显示类型和范围、Log
 - Duration 呈现仍由 Runtime 固定转换为分钟数字。
 - 新产生的离线事件已携带 App ID 与产生时 revision；v2 尚无独立 Binding epoch，
   同一 App 多次卸载再安装的严格隔离仍留待后续协议版本。
-- 持久事件队列尚未按 Cloud URL 与 Device 身份分区；修改设备身份前仍需显式处理旧队列。
+- 持久事件队列已按 Cloud URL 与 Device Serial 分区；旧版全局队列只有在 Binding 或
+  Last Known View 能证明来源相同时才迁移，来源不明的数据会被持久标记为隔离，避免
+  后续 Binding 更新后被错误认领。
 
 这些是后续迭代的输入，不通过在 `main.c` 中继续增加 App 特例解决。
 

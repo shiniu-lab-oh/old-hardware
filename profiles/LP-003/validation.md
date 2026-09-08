@@ -85,6 +85,16 @@ CONFIG_PB_PRIMARY_KEY_INDEX=3
 - 1 MiB 应用分区剩余 11%
 - 本轮仅验证构建，没有烧录设备
 
+2026-09-08 完成 Local First 持久事件队列身份隔离后的增量构建：
+
+- 事件队列按 Cloud URL 与 Device Serial 分区，Device Token 可独立轮换
+- 旧版全局队列仅在现有 Binding 或 Last Known View 能证明来源时迁移
+- 来源不明的旧事件持久隔离，不因后续 Binding 更新而被错误认领
+- LP-001 与 LP-003 使用同一 Runtime 源码构建通过
+- `pb_runtime.bin` 大小为 `0xe3620` bytes
+- 1 MiB 应用分区剩余 11%
+- 本轮仅验证构建，没有烧录设备
+
 2026-09-07 已完成 PB Runtime 全量构建和 COM5 烧录，写入校验通过。
 启动日志确认：
 
