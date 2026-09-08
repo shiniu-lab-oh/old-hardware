@@ -12,7 +12,7 @@ Overlay。PB Runtime 不解释 App ID、显示数值或动作的业务含义。
 ```http
 GET /api/pb/v1/devices/{serial}/state
 Authorization: Bearer {device_token}
-X-PB-Firmware: pb-runtime/0.2.0
+X-PB-Firmware: pb-runtime/0.3.0
 ```
 
 ```json
@@ -39,14 +39,18 @@ X-PB-Firmware: pb-runtime/0.2.0
 }
 ```
 
-- `view` 是可持久化的持续状态。
-- `timer` 可省略；`enabled: false` 会停止本地 Timer 并恢复 View。
+- `app`、`revision`、`view` 和 `timer` 共同构成 Runtime 的最小 App Binding 快照。
+- `timer` 可省略；v2 State 是完整快照，因此省略或 `enabled: false` 都表示禁用。
 - `overlay` 可省略，只在新 revision 到达时播放，不写入 Last Known View。
-- Runtime 只在 revision 增加时渲染并写入 NVS；相同 revision 去重，较低
-  revision 作为过期响应忽略。
+- Runtime 只在 revision 增加时采纳并写入 NVS；相同 revision 的相同内容去重，
+  相同 revision 的冲突内容拒绝，较低 revision 作为过期响应忽略。
+- v2 revision 必须是 `0..9007199254740991` 范围内的 JSON 整数，以避免 IEEE-754
+  数字精度导致错误排序。
+- Cloud 切换 `app` 时必须同时增加设备 revision。Runtime 采纳新 App 后取消旧 App
+  的本地 Timer、瞬时 Overlay 和尚未完成的按键手势。
 
-Timer 运行在设备本地。网络断开不会暂停或重置倒计时。v0.2 不持久化运行中的
-Timer，设备重启后会回到 Last Known View，等待云端状态。
+Timer 运行在设备本地。网络断开不会暂停或重置倒计时。Runtime 0.3 持久化 Timer
+配置但不持久化运行状态；设备重启后以 ready 状态恢复 Binding，可再次从本地启动。
 
 ## 通用动作
 
@@ -54,6 +58,8 @@ Timer，设备重启后会回到 Last Known View，等待云端状态。
 {
   "event_id": "550e8400-e29b-41d4-a716-446655440000",
   "occurred_at": 1788541200,
+  "app": "example.app",
+  "state_revision": 18,
   "type": "action",
   "action": "primary"
 }
@@ -63,6 +69,8 @@ Timer，设备重启后会回到 Last Known View，等待云端状态。
 {
   "event_id": "550e8400-e29b-41d4-a716-446655440001",
   "occurred_at": 1788541210,
+  "app": "example.app",
+  "state_revision": 18,
   "type": "action",
   "action": "primary_long"
 }
@@ -77,6 +85,8 @@ Timer，设备重启后会回到 Last Known View，等待云端状态。
 {
   "event_id": "550e8400-e29b-41d4-a716-446655440002",
   "occurred_at": 1788541220,
+  "app": "example.app",
+  "state_revision": 18,
   "type": "timer",
   "event": "started",
   "duration_seconds": 1500,
@@ -89,6 +99,9 @@ Timer，设备重启后会回到 Last Known View，等待云端状态。
 
 - `event_id` 是每次物理事件生成的 UUID。设备重试时必须保持原值；Cloud 以
   `(device, event_id)` 幂等处理。
+- `app` 与 `state_revision` 是事件产生时捕获的 Binding 上下文。Cloud 必须按捕获的
+  App 分发离线事件，不能在重连后按设备当前 App 重新解释。旧 Runtime 可以省略这两个
+  字段，此时 Cloud 使用当前 App 的兼容路由。
 - `occurred_at` 是可选的 Unix 秒时间戳。设备尚未完成校时时可以省略，Cloud
   此时使用接收时间。
 - Runtime 在发送前把事件写入 NVS FIFO。断网或请求失败时保留事件，恢复连接

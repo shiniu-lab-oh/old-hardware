@@ -9,6 +9,7 @@
 #define PB_EVENT_ID_LENGTH 36
 #define PB_VIEW_MAX_LEDS 4
 #define PB_TIMER_MAX_PRESETS 4
+#define PB_PROTOCOL_MAX_REVISION UINT64_C(9007199254740991)
 
 typedef enum {
     PB_ACTION_NONE = 0,
@@ -31,6 +32,8 @@ typedef enum {
 typedef struct {
     char event_id[PB_EVENT_ID_LENGTH + 1];
     int64_t occurred_at;
+    char app_id[PB_APP_ID_MAX_LENGTH + 1];
+    uint64_t state_revision;
     pb_event_type_t type;
     pb_action_t action;
     pb_timer_event_t timer_event;

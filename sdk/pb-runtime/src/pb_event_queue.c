@@ -9,7 +9,7 @@
 #include "esp_random.h"
 #include "nvs.h"
 
-#define PB_EVENT_QUEUE_SCHEMA_VERSION 1U
+#define PB_EVENT_QUEUE_SCHEMA_VERSION 2U
 #define PB_EVENT_QUEUE_NAMESPACE "pb_events"
 #define PB_EVENT_QUEUE_KEY "pending"
 #define PB_MIN_VALID_UNIX_TIME 1577836800LL
@@ -21,7 +21,28 @@ typedef struct {
     pb_event_queue_t queue;
 } stored_event_queue_t;
 
+typedef struct {
+    char event_id[PB_EVENT_ID_LENGTH + 1];
+    int64_t occurred_at;
+    pb_event_type_t type;
+    pb_action_t action;
+    pb_timer_event_t timer_event;
+    uint32_t duration_seconds;
+    uint32_t remaining_seconds;
+} pb_event_v1_t;
+
+typedef struct {
+    uint32_t count;
+    pb_event_v1_t items[PB_EVENT_QUEUE_CAPACITY];
+} pb_event_queue_v1_t;
+
+typedef struct {
+    uint32_t schema_version;
+    pb_event_queue_v1_t queue;
+} stored_event_queue_v1_t;
+
 static stored_event_queue_t s_stored_queue;
+static stored_event_queue_v1_t s_stored_queue_v1;
 static pb_event_queue_t s_next_queue;
 
 static bool event_valid(const pb_event_t *event)
@@ -30,11 +51,18 @@ static bool event_valid(const pb_event_t *event)
         strnlen(event->event_id, sizeof(event->event_id)) != PB_EVENT_ID_LENGTH) {
         return false;
     }
+    const size_t app_id_length = strnlen(event->app_id, sizeof(event->app_id));
+    if (app_id_length > PB_APP_ID_MAX_LENGTH ||
+        (app_id_length == 0 && event->state_revision != 0) ||
+        event->state_revision > PB_PROTOCOL_MAX_REVISION) {
+        return false;
+    }
     if (event->type == PB_EVENT_TYPE_ACTION) {
         return event->action == PB_ACTION_PRIMARY ||
                event->action == PB_ACTION_PRIMARY_LONG;
     }
     return event->type == PB_EVENT_TYPE_TIMER &&
+           event->timer_event >= PB_TIMER_EVENT_STARTED &&
            event->timer_event <= PB_TIMER_EVENT_FINISHED;
 }
 
@@ -129,29 +157,81 @@ esp_err_t pb_event_queue_init(pb_event_queue_t *queue)
         return err;
     }
 
-    size_t size = sizeof(s_stored_queue);
-    err = nvs_get_blob(
-        handle,
-        PB_EVENT_QUEUE_KEY,
-        &s_stored_queue,
-        &size);
-    nvs_close(handle);
+    size_t size = 0;
+    err = nvs_get_blob(handle, PB_EVENT_QUEUE_KEY, NULL, &size);
     if (err == ESP_ERR_NVS_NOT_FOUND) {
+        nvs_close(handle);
         return ESP_OK;
     }
-
-    bool valid = err == ESP_OK && size == sizeof(s_stored_queue) &&
-                 s_stored_queue.schema_version == PB_EVENT_QUEUE_SCHEMA_VERSION &&
-                 s_stored_queue.queue.count <= PB_EVENT_QUEUE_CAPACITY;
-    for (uint32_t index = 0; valid && index < s_stored_queue.queue.count; ++index) {
-        valid = event_valid(&s_stored_queue.queue.items[index]);
+    if (err != ESP_OK) {
+        nvs_close(handle);
+        return err;
     }
+
+    bool valid = false;
+    bool migrated = false;
+    if (size == sizeof(s_stored_queue)) {
+        err = nvs_get_blob(
+            handle,
+            PB_EVENT_QUEUE_KEY,
+            &s_stored_queue,
+            &size);
+        valid = err == ESP_OK &&
+                s_stored_queue.schema_version == PB_EVENT_QUEUE_SCHEMA_VERSION &&
+                s_stored_queue.queue.count <= PB_EVENT_QUEUE_CAPACITY;
+        for (uint32_t index = 0;
+             valid && index < s_stored_queue.queue.count;
+             ++index) {
+            valid = event_valid(&s_stored_queue.queue.items[index]);
+        }
+        if (valid) {
+            *queue = s_stored_queue.queue;
+        }
+    } else if (size == sizeof(s_stored_queue_v1)) {
+        err = nvs_get_blob(
+            handle,
+            PB_EVENT_QUEUE_KEY,
+            &s_stored_queue_v1,
+            &size);
+        valid = err == ESP_OK && s_stored_queue_v1.schema_version == 1U &&
+                s_stored_queue_v1.queue.count <= PB_EVENT_QUEUE_CAPACITY;
+        if (valid) {
+            queue->count = s_stored_queue_v1.queue.count;
+        }
+        for (uint32_t index = 0; valid && index < queue->count; ++index) {
+            const pb_event_v1_t *source = &s_stored_queue_v1.queue.items[index];
+            pb_event_t *target = &queue->items[index];
+            if (strnlen(source->event_id, sizeof(source->event_id)) !=
+                PB_EVENT_ID_LENGTH) {
+                valid = false;
+                break;
+            }
+            memcpy(target->event_id, source->event_id, sizeof(target->event_id));
+            target->occurred_at = source->occurred_at;
+            target->type = source->type;
+            target->action = source->action;
+            target->timer_event = source->timer_event;
+            target->duration_seconds = source->duration_seconds;
+            target->remaining_seconds = source->remaining_seconds;
+            valid = event_valid(target);
+        }
+        migrated = valid;
+    }
+    nvs_close(handle);
+
     if (!valid) {
         ESP_LOGW(TAG, "Discarding an invalid persisted event queue");
         return clear_stored_queue();
     }
 
-    *queue = s_stored_queue.queue;
+    if (migrated) {
+        ESP_LOGW(TAG,
+                 "Migrated pending events without App context; compatibility routing applies");
+        err = store_queue(queue);
+        if (err != ESP_OK) {
+            return err;
+        }
+    }
     ESP_LOGI(TAG, "Loaded %" PRIu32 " pending event(s)", queue->count);
     return ESP_OK;
 }
@@ -228,7 +308,8 @@ esp_err_t pb_event_make_timer(
     uint32_t remaining_seconds
 )
 {
-    if (timer_event > PB_TIMER_EVENT_FINISHED || duration_seconds == 0 ||
+    if (timer_event < PB_TIMER_EVENT_STARTED ||
+        timer_event > PB_TIMER_EVENT_FINISHED || duration_seconds == 0 ||
         remaining_seconds > duration_seconds) {
         return ESP_ERR_INVALID_ARG;
     }
@@ -239,4 +320,26 @@ esp_err_t pb_event_make_timer(
         event->remaining_seconds = remaining_seconds;
     }
     return err;
+}
+
+esp_err_t pb_event_set_context(
+    pb_event_t *event,
+    const char *app_id,
+    uint64_t state_revision
+)
+{
+    if (event == NULL || app_id == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    const size_t app_id_length = strnlen(app_id, PB_APP_ID_MAX_LENGTH + 1);
+    if (app_id_length == 0 || app_id_length > PB_APP_ID_MAX_LENGTH) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    if (state_revision > PB_PROTOCOL_MAX_REVISION) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    strlcpy(event->app_id, app_id, sizeof(event->app_id));
+    event->state_revision = state_revision;
+    return ESP_OK;
 }

@@ -1,6 +1,6 @@
 # PB 架构
 
-> 状态：架构方向已确认，正在渐进落地。当前基线为 PB Runtime 0.2 / PB App
+> 状态：架构方向已确认，正在渐进落地。当前基线为 PB Runtime 0.3 / PB App
 > Protocol v2；本文描述下一阶段约束，不表示所有模块已经完成拆分。
 
 ## 1. PB 的定义
@@ -174,9 +174,12 @@ Capability 是硬件可兑现的契约，至少覆盖显示类型和范围、Log
 - Worker 只接收持久队列头部 Event 的不可变副本；Core 校验回执 `event_id` 后才从
   持久队列出队，失败、断网和异常回执均保留原事件。
 - Driver 输入事件已经带有消抖完成时的单调采样时间。
-- NVS 主要保存 View 与 revision，Binding 和完整 Timer 配置尚未持久化。
+- NVS 已保存当前 App ID、revision、View 与 Timer 配置组成的最小 Binding；运行中的
+  Timer 和瞬时 Overlay 不恢复。
 - Duration 呈现仍由 Runtime 固定转换为分钟数字。
-- 离线事件尚未绑定原始 App Binding 上下文。
+- 新产生的离线事件已携带 App ID 与产生时 revision；v2 尚无独立 Binding epoch，
+  同一 App 多次卸载再安装的严格隔离仍留待后续协议版本。
+- 持久事件队列尚未按 Cloud URL 与 Device 身份分区；修改设备身份前仍需显式处理旧队列。
 
 这些是后续迭代的输入，不通过在 `main.c` 中继续增加 App 特例解决。
 

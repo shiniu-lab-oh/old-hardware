@@ -27,5 +27,10 @@ esp_err_t pb_event_make_timer(
     uint32_t duration_seconds,
     uint32_t remaining_seconds
 );
+esp_err_t pb_event_set_context(
+    pb_event_t *event,
+    const char *app_id,
+    uint64_t state_revision
+);
 
 #endif

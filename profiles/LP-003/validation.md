@@ -74,6 +74,17 @@ CONFIG_PB_PRIMARY_KEY_INDEX=3
 - 1 MiB 应用分区仍剩余 12%
 - 本轮仅验证构建，没有烧录设备
 
+2026-09-08 完成 Runtime 0.3 最小 App Binding 持久化后的增量构建：
+
+- NVS 快照包含 App ID、revision、View 与 Timer 配置
+- 重启只恢复 ready Timer 配置，不恢复运行中的倒计时
+- App 切换会取消旧 Timer、Overlay 与未完成输入手势
+- 新事件保存产生时的 App ID 与 State revision；v0.2 队列可无损迁移
+- LP-001 与 LP-003 使用同一 Runtime 源码构建通过
+- `pb_runtime.bin` 大小为 `0xe3200` bytes
+- 1 MiB 应用分区剩余 11%
+- 本轮仅验证构建，没有烧录设备
+
 2026-09-07 已完成 PB Runtime 全量构建和 COM5 烧录，写入校验通过。
 启动日志确认：
 

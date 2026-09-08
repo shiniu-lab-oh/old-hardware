@@ -14,6 +14,7 @@
 #include "freertos/task.h"
 #include "nvs_flash.h"
 #include "pb_actions.h"
+#include "pb_binding.h"
 #include "pb_event_queue.h"
 #include "pb_hal.h"
 #include "pb_network_worker.h"
@@ -23,8 +24,9 @@
 #include "sdkconfig.h"
 
 #define PB_WIFI_CONNECTED_BIT BIT0
-#define PB_RUNTIME_VERSION "pb-runtime/0.2.0"
+#define PB_RUNTIME_VERSION "pb-runtime/0.3.0"
 #define PB_EVENT_RETRY_INTERVAL_MS 5000
+#define PB_BINDING_STORE_RETRY_INTERVAL_MS 5000
 
 static const char *TAG = "pb_runtime";
 static EventGroupHandle_t s_wifi_events;
@@ -139,43 +141,73 @@ static esp_err_t apply_state(
     const pb_app_state_t *next_state,
     const char *cloud_base_url,
     const char *device_serial,
-    pb_view_t *current_view,
-    uint64_t *current_revision,
-    bool *has_current_revision,
+    pb_binding_t *current_binding,
+    bool *has_current_binding,
+    bool *binding_store_dirty,
+    bool *binding_replaced,
     pb_local_timer_t *timer,
     pb_overlay_t *overlay
 )
 {
-    if (*has_current_revision && next_state->revision < *current_revision) {
+    *binding_replaced = false;
+    if (*has_current_binding &&
+        next_state->revision < current_binding->revision) {
         ESP_LOGW(TAG,
                  "Ignoring stale state revision=%" PRIu64 " current=%" PRIu64,
                  next_state->revision,
-                 *current_revision);
+                 current_binding->revision);
         return ESP_OK;
     }
 
-    const bool timer_was_active = pb_timer_active(timer);
-    pb_timer_configure(timer, &next_state->timer);
-    if (*has_current_revision && next_state->revision == *current_revision) {
-        if (timer_was_active && !pb_timer_active(timer) &&
-            !pb_overlay_active(overlay)) {
-            return pb_view_render(current_view);
+    if (*has_current_binding &&
+        next_state->revision == current_binding->revision) {
+        if (!pb_binding_matches_state(current_binding, next_state)) {
+            ESP_LOGE(TAG,
+                     "Conflicting state at revision=%" PRIu64 " ignored",
+                     current_binding->revision);
+            return ESP_ERR_INVALID_RESPONSE;
         }
-        ESP_LOGD(TAG, "State revision=%" PRIu64 " unchanged", *current_revision);
+        ESP_LOGD(TAG,
+                 "State revision=%" PRIu64 " unchanged",
+                 current_binding->revision);
         return ESP_OK;
     }
 
-    *current_view = next_state->view;
-    *current_revision = next_state->revision;
-    *has_current_revision = true;
-    esp_err_t err = pb_view_store_last(
+    pb_binding_t next_binding;
+    esp_err_t err = pb_binding_from_state(&next_binding, next_state);
+    if (err != ESP_OK) {
+        return err;
+    }
+
+    const bool app_changed = !*has_current_binding ||
+        strcmp(current_binding->app_id, next_binding.app_id) != 0;
+    err = pb_binding_store(
         cloud_base_url,
         device_serial,
-        current_view,
-        *current_revision);
+        &next_binding);
     if (err != ESP_OK) {
-        ESP_LOGW(TAG, "Could not store last view: %s", esp_err_to_name(err));
+        *binding_store_dirty = true;
+        ESP_LOGW(TAG,
+                 "Could not persist binding; retry scheduled: %s",
+                 esp_err_to_name(err));
+    } else {
+        *binding_store_dirty = false;
     }
+
+    if (app_changed) {
+        pb_timer_init(timer);
+        pb_overlay_init(overlay);
+        *binding_replaced = true;
+    }
+    pb_timer_configure(timer, &next_binding.timer);
+    *current_binding = next_binding;
+    *has_current_binding = true;
+
+    ESP_LOGI(TAG,
+             "%s App binding: app=%s revision=%" PRIu64,
+             app_changed ? "Activated" : "Updated",
+             current_binding->app_id,
+             current_binding->revision);
 
     if (next_state->overlay.enabled) {
         return pb_overlay_show_code(
@@ -185,17 +217,21 @@ static esp_err_t apply_state(
             next_state->overlay.blink);
     }
     if (!pb_overlay_active(overlay)) {
-        return render_current(timer, current_view);
+        return render_current(timer, &current_binding->view);
     }
     return ESP_OK;
 }
 
 static esp_err_t enqueue_timer_event(
     pb_event_queue_t *queue,
+    const pb_binding_t *binding,
     pb_local_timer_t *timer,
     pb_timer_event_t event
 )
 {
+    if (queue == NULL || binding == NULL || timer == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     static const char *const names[] = {"started", "paused", "resumed", "finished"};
     ESP_LOGI(TAG,
              "Timer %s: duration=%" PRIu32 " remaining=%" PRIu32,
@@ -208,6 +244,12 @@ static esp_err_t enqueue_timer_event(
         event,
         timer->duration_seconds,
         event == PB_TIMER_EVENT_FINISHED ? 0 : pb_timer_remaining_seconds(timer));
+    if (err == ESP_OK) {
+        err = pb_event_set_context(
+            &pending,
+            binding->app_id,
+            binding->revision);
+    }
     if (err == ESP_OK) {
         err = pb_event_queue_enqueue(queue, &pending);
     }
@@ -224,11 +266,21 @@ static esp_err_t enqueue_timer_event(
 
 static esp_err_t enqueue_action_event(
     pb_event_queue_t *queue,
+    const pb_binding_t *binding,
     pb_action_t action
 )
 {
+    if (queue == NULL || binding == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
     pb_event_t pending;
     esp_err_t err = pb_event_make_action(&pending, action);
+    if (err == ESP_OK) {
+        err = pb_event_set_context(
+            &pending,
+            binding->app_id,
+            binding->revision);
+    }
     if (err == ESP_OK) {
         err = pb_event_queue_enqueue(queue, &pending);
     }
@@ -266,21 +318,33 @@ void app_main(void)
     vTaskDelay(pdMS_TO_TICKS(CONFIG_PB_BOOT_OVERLAY_MS));
     pb_overlay_init(&overlay);
 
-    pb_view_t current_view;
-    uint64_t current_revision = 0;
-    bool has_current_revision =
-        pb_view_load_last(
+    pb_binding_t current_binding;
+    pb_binding_init(&current_binding);
+    bool has_current_binding =
+        pb_binding_load(
             CONFIG_PB_CLOUD_BASE_URL,
             CONFIG_PB_DEVICE_SERIAL,
-            &current_view,
-            &current_revision) == ESP_OK;
-    if (!has_current_revision) {
-        pb_view_default(&current_view);
+            &current_binding) == ESP_OK;
+    if (!has_current_binding) {
+        uint64_t legacy_revision;
+        if (pb_view_load_last(
+                CONFIG_PB_CLOUD_BASE_URL,
+                CONFIG_PB_DEVICE_SERIAL,
+                &current_binding.view,
+                &legacy_revision) == ESP_OK) {
+            ESP_LOGW(TAG,
+                     "Loaded legacy View revision=%" PRIu64
+                     " without App binding; waiting for a complete State",
+                     legacy_revision);
+        }
     }
 
     pb_local_timer_t timer;
     pb_timer_init(&timer);
-    ESP_ERROR_CHECK(pb_view_render(&current_view));
+    if (has_current_binding) {
+        pb_timer_configure(&timer, &current_binding.timer);
+    }
+    ESP_ERROR_CHECK(pb_view_render(&current_binding.view));
 
     const pb_cloud_config_t cloud_config = {
         .base_url = CONFIG_PB_CLOUD_BASE_URL,
@@ -297,10 +361,11 @@ void app_main(void)
     }
 
     ESP_LOGI(TAG,
-             "PB Runtime ready: serial=%s profile=%s cached_revision=%llu",
+             "PB Runtime ready: serial=%s profile=%s app=%s cached_revision=%llu",
              CONFIG_PB_DEVICE_SERIAL,
              CONFIG_PB_PANEL_PROFILE,
-             (unsigned long long)current_revision);
+             has_current_binding ? current_binding.app_id : "none",
+             (unsigned long long)current_binding.revision);
     ESP_LOGI(TAG,
              "PB HAL ready: digits=%u controls=%u leds=%u",
              caps.display_digits,
@@ -309,8 +374,10 @@ void app_main(void)
 
     TickType_t next_poll = 0;
     TickType_t next_event_retry = 0;
+    TickType_t next_binding_store_retry = 0;
     bool state_request_in_flight = false;
     bool event_request_in_flight = false;
+    bool binding_store_dirty = false;
     bool primary_pressed = false;
     uint64_t primary_pressed_at_ms = 0;
 
@@ -329,15 +396,26 @@ void app_main(void)
                     continue;
                 }
 
+                bool binding_replaced;
                 const esp_err_t err = apply_state(
                     &network_result.data.state,
                     CONFIG_PB_CLOUD_BASE_URL,
                     CONFIG_PB_DEVICE_SERIAL,
-                    &current_view,
-                    &current_revision,
-                    &has_current_revision,
+                    &current_binding,
+                    &has_current_binding,
+                    &binding_store_dirty,
+                    &binding_replaced,
                     &timer,
                     &overlay);
+                if (binding_replaced) {
+                    primary_pressed = false;
+                }
+                if (binding_store_dirty && next_binding_store_retry == 0) {
+                    next_binding_store_retry = now +
+                        pdMS_TO_TICKS(PB_BINDING_STORE_RETRY_INTERVAL_MS);
+                } else if (!binding_store_dirty) {
+                    next_binding_store_retry = 0;
+                }
                 if (err != ESP_OK) {
                     ESP_LOGW(TAG,
                              "State apply failed; keeping local state: %s",
@@ -399,25 +477,52 @@ void app_main(void)
                 &overlay, 404, CONFIG_PB_OFFLINE_OVERLAY_MS, false));
         }
 
+        if (binding_store_dirty &&
+            (next_binding_store_retry == 0 ||
+             (int32_t)(now - next_binding_store_retry) >= 0)) {
+            const esp_err_t err = pb_binding_store(
+                CONFIG_PB_CLOUD_BASE_URL,
+                CONFIG_PB_DEVICE_SERIAL,
+                &current_binding);
+            if (err == ESP_OK) {
+                binding_store_dirty = false;
+                next_binding_store_retry = 0;
+                ESP_LOGI(TAG, "Persisted previously dirty App binding");
+            } else {
+                next_binding_store_retry = now +
+                    pdMS_TO_TICKS(PB_BINDING_STORE_RETRY_INTERVAL_MS);
+                ESP_LOGW(TAG,
+                         "Binding persistence retry failed: %s",
+                         esp_err_to_name(err));
+            }
+        }
+
         if (pb_timer_poll_finished(&timer)) {
             if (!pb_overlay_active(&overlay)) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(pb_view_render(&current_view));
+                ESP_ERROR_CHECK_WITHOUT_ABORT(pb_view_render(&current_binding.view));
             }
-            if (network_err == ESP_OK) {
+            if (network_err == ESP_OK && has_current_binding) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
-                    &event_queue, &timer, PB_TIMER_EVENT_FINISHED));
+                    &event_queue,
+                    &current_binding,
+                    &timer,
+                    PB_TIMER_EVENT_FINISHED));
                 next_event_retry = 0;
             }
         } else if (pb_timer_active(&timer) && !pb_overlay_active(&overlay)) {
             const uint32_t minutes =
                 (pb_timer_remaining_seconds(&timer) + 59U) / 60U;
             if (minutes != timer.last_displayed_minutes) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
+                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(
+                    &timer,
+                    &current_binding.view));
             }
         }
 
         if (pb_overlay_take_expired(&overlay)) {
-            ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
+            ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(
+                &timer,
+                &current_binding.view));
         }
 
         if (network_err == ESP_OK && wifi_connected() &&
@@ -482,26 +587,35 @@ void app_main(void)
                 continue;
             }
             ESP_LOGI(TAG, "Action: primary_long (%" PRIu32 " ms)", held_ms);
-            if (network_err == ESP_OK) {
+            if (network_err == ESP_OK && has_current_binding) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_action_event(
-                    &event_queue, PB_ACTION_PRIMARY_LONG));
+                    &event_queue,
+                    &current_binding,
+                    PB_ACTION_PRIMARY_LONG));
                 next_event_retry = 0;
             }
         } else if (pb_timer_enabled(&timer)) {
             const pb_timer_event_t event = pb_timer_toggle(&timer);
             if (!pb_overlay_active(&overlay)) {
-                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(&timer, &current_view));
+                ESP_ERROR_CHECK_WITHOUT_ABORT(render_current(
+                    &timer,
+                    &current_binding.view));
             }
-            if (network_err == ESP_OK) {
+            if (network_err == ESP_OK && has_current_binding) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_timer_event(
-                    &event_queue, &timer, event));
+                    &event_queue,
+                    &current_binding,
+                    &timer,
+                    event));
                 next_event_retry = 0;
             }
         } else {
             ESP_LOGI(TAG, "Action: primary");
-            if (network_err == ESP_OK) {
+            if (network_err == ESP_OK && has_current_binding) {
                 ESP_ERROR_CHECK_WITHOUT_ABORT(enqueue_action_event(
-                    &event_queue, PB_ACTION_PRIMARY));
+                    &event_queue,
+                    &current_binding,
+                    PB_ACTION_PRIMARY));
                 next_event_retry = 0;
             }
         }

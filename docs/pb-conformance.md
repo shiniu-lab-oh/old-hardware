@@ -35,6 +35,9 @@
 | 运行中断电不伪造完成 | NOT RUN | NOT RUN | NOT RUN |
 | 离线事件按原 Binding 补发 | NOT RUN | NOT RUN | NOT RUN |
 
+Runtime 0.3 已实现上述离线重启与事件归属所需的软件路径，但在完成断网、断电和 App
+切换实机流程前，矩阵状态继续保持 `NOT RUN`。
+
 LP-003 的详细证据见 `profiles/LP-003/validation.md`。第二种 VFD 在芯片、接线和能力完成
 逆向前保持 `NOT RUN`，不预设其显示和输入能力。
 

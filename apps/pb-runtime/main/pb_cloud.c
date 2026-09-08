@@ -1,6 +1,8 @@
 #include "pb_cloud.h"
 
 #include <inttypes.h>
+#include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -151,6 +153,46 @@ static bool json_boolean(const cJSON *object, const char *name, bool *value)
     return true;
 }
 
+static bool json_uint64(const cJSON *item, uint64_t maximum, uint64_t *value)
+{
+    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+        item->valuedouble < 0 ||
+        item->valuedouble > (double)maximum) {
+        return false;
+    }
+    const uint64_t parsed = (uint64_t)item->valuedouble;
+    if ((double)parsed != item->valuedouble) {
+        return false;
+    }
+    *value = parsed;
+    return true;
+}
+
+static bool json_uint32(const cJSON *item, uint32_t *value)
+{
+    uint64_t parsed;
+    if (!json_uint64(item, UINT32_MAX, &parsed)) {
+        return false;
+    }
+    *value = (uint32_t)parsed;
+    return true;
+}
+
+static bool json_int(const cJSON *item, int *value)
+{
+    if (!cJSON_IsNumber(item) || !isfinite(item->valuedouble) ||
+        item->valuedouble < INT_MIN ||
+        item->valuedouble > INT_MAX) {
+        return false;
+    }
+    const int parsed = (int)item->valuedouble;
+    if ((double)parsed != item->valuedouble) {
+        return false;
+    }
+    *value = parsed;
+    return true;
+}
+
 static bool parse_timer(const cJSON *root, pb_timer_config_t *timer)
 {
     const cJSON *item = cJSON_GetObjectItemCaseSensitive(root, "timer");
@@ -166,11 +208,10 @@ static bool parse_timer(const cJSON *root, pb_timer_config_t *timer)
 
     const cJSON *default_seconds =
         cJSON_GetObjectItemCaseSensitive(item, "default_seconds");
-    if (!cJSON_IsNumber(default_seconds) || default_seconds->valuedouble <= 0 ||
-        default_seconds->valuedouble > UINT32_MAX) {
+    if (!json_uint32(default_seconds, &timer->default_seconds) ||
+        timer->default_seconds == 0) {
         return false;
     }
-    timer->default_seconds = (uint32_t)default_seconds->valuedouble;
 
     const cJSON *presets = cJSON_GetObjectItemCaseSensitive(item, "presets_seconds");
     if (presets == NULL) {
@@ -187,11 +228,10 @@ static bool parse_timer(const cJSON *root, pb_timer_config_t *timer)
     timer->preset_count = (uint8_t)count;
     for (int index = 0; index < count; ++index) {
         const cJSON *preset = cJSON_GetArrayItem(presets, index);
-        if (!cJSON_IsNumber(preset) || preset->valuedouble <= 0 ||
-            preset->valuedouble > UINT32_MAX) {
+        if (!json_uint32(preset, &timer->presets_seconds[index]) ||
+            timer->presets_seconds[index] == 0) {
             return false;
         }
-        timer->presets_seconds[index] = (uint32_t)preset->valuedouble;
     }
     return true;
 }
@@ -208,14 +248,13 @@ static bool parse_overlay(const cJSON *root, pb_state_overlay_t *overlay)
 
     const cJSON *value = cJSON_GetObjectItemCaseSensitive(item, "value");
     const cJSON *duration = cJSON_GetObjectItemCaseSensitive(item, "duration_ms");
-    if (!cJSON_IsNumber(value) || !cJSON_IsNumber(duration) ||
-        duration->valuedouble <= 0 || duration->valuedouble > UINT32_MAX ||
+    if (!json_int(value, &overlay->value) ||
+        !json_uint32(duration, &overlay->duration_ms) ||
+        overlay->duration_ms == 0 ||
         !json_boolean(item, "blink", &overlay->blink)) {
         return false;
     }
     overlay->enabled = true;
-    overlay->value = value->valueint;
-    overlay->duration_ms = (uint32_t)duration->valuedouble;
     return true;
 }
 
@@ -246,13 +285,18 @@ static esp_err_t parse_state(
         .leading_zeroes = true,
         .brightness = 100,
     };
-    bool valid = cJSON_IsNumber(revision_item) && revision_item->valuedouble >= 0 &&
+    uint64_t revision;
+    uint32_t brightness;
+    bool valid = json_uint64(
+                     revision_item,
+                     PB_PROTOCOL_MAX_REVISION,
+                     &revision) &&
                  cJSON_IsString(app_item) && app_item->valuestring != NULL &&
                  app_item->valuestring[0] != '\0' &&
                  strlen(app_item->valuestring) <= PB_APP_ID_MAX_LENGTH &&
-                 cJSON_IsNumber(value_item) &&
-                 cJSON_IsNumber(brightness_item) &&
-                 brightness_item->valueint >= 0 && brightness_item->valueint <= 100 &&
+                 json_int(value_item, &parsed.value) &&
+                 json_uint32(brightness_item, &brightness) &&
+                 brightness <= 100 &&
                  cJSON_IsArray(leds_item) &&
                  json_boolean(view_item, "leading_zeroes", &parsed.leading_zeroes) &&
                  json_boolean(view_item, "blink", &parsed.blink) &&
@@ -260,8 +304,7 @@ static esp_err_t parse_state(
                  parse_overlay(root, &state->overlay);
 
     if (valid) {
-        parsed.value = value_item->valueint;
-        parsed.brightness = (uint8_t)brightness_item->valueint;
+        parsed.brightness = (uint8_t)brightness;
         const int led_count = cJSON_GetArraySize(leds_item);
         valid = led_count >= 0 && led_count <= PB_VIEW_MAX_LEDS;
         parsed.led_count = valid ? (uint8_t)led_count : 0;
@@ -274,7 +317,7 @@ static esp_err_t parse_state(
     }
 
     if (valid) {
-        state->revision = (uint64_t)revision_item->valuedouble;
+        state->revision = revision;
         strlcpy(state->app_id, app_item->valuestring, sizeof(state->app_id));
         state->view = parsed;
     }
@@ -294,11 +337,10 @@ static esp_err_t parse_event_response(
 
     const cJSON *ok = cJSON_GetObjectItemCaseSensitive(root, "ok");
     const cJSON *revision_item = cJSON_GetObjectItemCaseSensitive(root, "revision");
-    const bool valid = cJSON_IsTrue(ok) && cJSON_IsNumber(revision_item) &&
-                       revision_item->valuedouble >= 0;
-    if (valid) {
-        *revision = (uint64_t)revision_item->valuedouble;
-    }
+    const bool valid = cJSON_IsTrue(ok) && json_uint64(
+        revision_item,
+        PB_PROTOCOL_MAX_REVISION,
+        revision);
     cJSON_Delete(root);
     return valid ? ESP_OK : ESP_ERR_INVALID_RESPONSE;
 }
@@ -363,9 +405,16 @@ esp_err_t pb_cloud_post_event(
     uint64_t *revision
 )
 {
+    const size_t app_id_length = event == NULL
+        ? 0
+        : strnlen(event->app_id, sizeof(event->app_id));
     if (cloud == NULL || event == NULL || revision == NULL ||
         strnlen(event->event_id, sizeof(event->event_id)) != PB_EVENT_ID_LENGTH ||
-        event->type > PB_EVENT_TYPE_TIMER) {
+        app_id_length > PB_APP_ID_MAX_LENGTH ||
+        (app_id_length == 0 && event->state_revision != 0) ||
+        event->state_revision > PB_PROTOCOL_MAX_REVISION ||
+        (event->type != PB_EVENT_TYPE_ACTION &&
+         event->type != PB_EVENT_TYPE_TIMER)) {
         return ESP_ERR_INVALID_ARG;
     }
 
@@ -379,7 +428,13 @@ esp_err_t pb_cloud_post_event(
     if (root == NULL ||
         cJSON_AddStringToObject(root, "event_id", event->event_id) == NULL ||
         (event->occurred_at > 0 &&
-         cJSON_AddNumberToObject(root, "occurred_at", (double)event->occurred_at) == NULL)) {
+         cJSON_AddNumberToObject(root, "occurred_at", (double)event->occurred_at) == NULL) ||
+        (event->app_id[0] != '\0' &&
+         (cJSON_AddStringToObject(root, "app", event->app_id) == NULL ||
+          cJSON_AddNumberToObject(
+              root,
+              "state_revision",
+              (double)event->state_revision) == NULL))) {
         cJSON_Delete(root);
         return ESP_ERR_NO_MEM;
     }
@@ -396,6 +451,7 @@ esp_err_t pb_cloud_post_event(
                         ? "primary_long"
                         : "primary") != NULL;
     } else if (event->type == PB_EVENT_TYPE_TIMER &&
+               event->timer_event >= PB_TIMER_EVENT_STARTED &&
                event->timer_event <= PB_TIMER_EVENT_FINISHED) {
         valid = cJSON_AddStringToObject(root, "type", "timer") != NULL &&
                 cJSON_AddStringToObject(

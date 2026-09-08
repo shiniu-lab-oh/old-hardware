@@ -1,6 +1,7 @@
 idf_component_register(
     SRCS
         "src/pb_actions.c"
+        "src/pb_binding.c"
         "src/pb_event_queue.c"
         "src/pb_overlay.c"
         "src/pb_timer.c"
