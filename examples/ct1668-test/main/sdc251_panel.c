@@ -50,9 +50,9 @@ esp_err_t sdc251_panel_init(void)
     if (err != ESP_OK) { return err; }
     green_on = false;
     initialized = true;
-    ESP_LOGI(TAG, "[PANEL] GPIO%d -> pin6 GREEN_LED_CTRL, HIGH active",
+    ESP_LOGI(TAG, "[PANEL] GPIO%d -> J1 Pin 3 GREEN_LED_CTRL, HIGH active",
              (int)SDC251_GPIO_GREEN_LED);
-    ESP_LOGI(TAG, "[PANEL] GPIO%d <- pin5 IR_OUT: input only, decoding disabled",
+    ESP_LOGI(TAG, "[PANEL] GPIO%d <- J1 Pin 4 IR_OUT: input only, decoding disabled",
              (int)SDC251_GPIO_IR_IN);
     log_green();
     return ESP_OK;

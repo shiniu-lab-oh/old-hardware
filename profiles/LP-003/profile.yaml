@@ -90,38 +90,38 @@ capabilities:
 interface:
   signals:
     - pin: 1
-      name: STB
-      esp32_gpio: 25
-      direction: output
-      notes: "PCB path includes approximately 100 ohms"
+      name: VDD
+      voltage: 3.3V
+      direction: power
     - pin: 2
       name: GND
       direction: ground
     - pin: 3
-      name: CLK
-      esp32_gpio: 26
-      direction: output
-    - pin: 4
-      name: DIO
-      esp32_gpio: 27
-      direction: bidirectional
-    - pin: 5
-      name: IR_OUT
-      esp32_gpio: 32
-      direction: input
-      notes: "Input only; decoding disabled"
-    - pin: 6
       name: GREEN_LED_CTRL
-      esp32_gpio: 33
+      esp32_gpio: 27
       direction: output
       active: high
+    - pin: 4
+      name: IR_OUT
+      esp32_gpio: 26
+      direction: input
+      notes: "Input only; decoding disabled"
+    - pin: 5
+      name: DIO
+      esp32_gpio: 25
+      direction: bidirectional
+    - pin: 6
+      name: CLK
+      esp32_gpio: 33
+      direction: output
     - pin: 7
       name: GND
       direction: ground
     - pin: 8
-      name: VDD
-      voltage: 3.3V
-      direction: power
+      name: STB
+      esp32_gpio: 32
+      direction: output
+      notes: "PCB path includes approximately 100 ohms"
 
 controller:
   platform: ESP32
@@ -152,10 +152,12 @@ status:
   production_ready: false
 
 photos:
-  panel: null
-  pinout: null
+  panel: "photos/lp003-panel.jpg"
+  pinout: "photos/lp003-pinout.png"
 
 notes:
   - "CT1668 尚未确认与 TM1668 完全兼容；Driver 只承诺当前实测子集。"
   - "小数点未观察到可见响应，不作为当前能力暴露。"
-  - "Pinout 标准图片和 hello-panel / factory-test 的 LP-003 完整验收仍待完成。"
+  - "2026-09-10 为方便接线，将 ESP32 映射调整为 STB32、CLK33、DIO25、IR26、LED27；显示、KEY_3 / OK 和绿灯已完成实机验证，IR 仍未验证。"
+  - "J1 编号以 PCB 元件面观察，靠近电源 / 状态指示灯一侧为 Pin 1；早期逆向记录使用过相反的临时编号。"
+  - "hello-panel / factory-test 的 LP-003 完整验收仍待完成。"

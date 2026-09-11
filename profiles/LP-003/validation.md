@@ -148,7 +148,7 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 | 4 位七段显示映射 | PASS | CT1668 段位扫描记录 |
 | 中间冒号 | PASS | `0xC2 bit7` 实测 |
 | 7 个单键 | PASS | 主机测试和实机按键记录 |
-| 绿灯控制 | PASS | GPIO33 实机测试 |
+| 绿灯控制 | PASS | GPIO27 新接线实测；GPIO33 旧接线也曾验证 |
 | Runtime 构建 / 烧录 / 启动 | PASS | ESP-IDF v6.0.2 实机日志 |
 | Profile 独立构建配置 | PASS | 2026-09-08 全新构建与生成的 sdkconfig |
 | Cloud State 拉取 | PASS | `app=one revision=11` 日志 |
@@ -165,7 +165,36 @@ PB Runtime ready: serial=PB01-0001 profile=LP-003 cached_revision=11
 
 ## 未完成项
 
-- 补充 `photos/lp003-panel.jpg` 与 `photos/lp003-pinout.png`。
-- 只按 `pinout.md` 断开并重新接线，升级 Pinout 为 `verified`。
 - 跑通 LP-003 的 `hello-panel` 和 `factory-test`。
-- 使用 LP-001 运行相同的 PB Conformance 实机流程。
+- 动态验证 IR_OUT。
+- 按项目最低要求完成完整验收前，整体 Pinout 状态继续保持 `mapped`。
+
+## 2026-09-10 接线迁移
+
+为方便实际接线，LP-003 的 ESP32 映射调整为：
+
+- J1 Pin 8 STB -> GPIO32
+- J1 Pin 6 CLK -> GPIO33
+- J1 Pin 5 DIO -> GPIO25
+- J1 Pin 4 IR_OUT -> GPIO26
+- J1 Pin 3 GREEN_LED_CTRL -> GPIO27
+
+使用独立 `build-production-lp003` 目录完成 ESP-IDF v6.0.2 全新构建：
+
+- 生成配置确认 `CONFIG_PB_PANEL_PROFILE="LP-003"`
+- 生成配置确认 `CONFIG_PB_PRIMARY_KEY_INDEX=3`
+- `pb_runtime.bin` 大小为 `0xe3810` bytes，1 MiB 应用分区剩余 11%
+- 在 CH340 / COM4 完成 bootloader、分区表和 App 烧录，三个镜像均通过 Hash 校验
+- 启动日志确认 LP-003 Driver 和 PB HAL 初始化成功，能力为 4 位显示、7 键、1 个 LED
+- Wi-Fi 连接成功，并从正式 Cloud 获取 ONE revision 23
+- 用户确认数码管稳定显示 `0000`，GPIO27 控制的绿色 LED 常亮
+- 一次受控约 1 秒 KEY_3 / OK 按压只产生一个 `primary` Event，事件成功提交并从
+  1 pending 回到 0，确认 GPIO32 / GPIO33 / GPIO25 总线的按键读取正常
+
+2026-09-11 根据项目统一规则，将 J1 编号修正为从 PCB 元件面观察、靠近电源 /
+状态指示灯一侧为 Pin 1。此修正只反转早期临时物理编号，不改变上述 ESP32 GPIO
+映射或已验证的运行行为。标准 `lp003-pinout.png` 已补充。
+
+当前运行所需的显示、按键与 LED 信号均已通过。IR_OUT 仍未动态验证，且 LP-003
+尚未完成 `hello-panel` / `factory-test` 完整验收，因此 Profile 的整体 Pinout 状态
+继续保持 `mapped`。

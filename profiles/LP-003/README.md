@@ -2,6 +2,12 @@
 
 > 康佳 SDC251 数字电视机顶盒前面板，已接入 Old Panel SDK。
 
+## 图片
+
+![康佳 SDC251 原始设备](photos/lp003-panel.jpg)
+
+![LP-003 J1 Pinout](photos/lp003-pinout.png)
+
 ## 原始设备
 
 - 品牌：康佳
@@ -19,7 +25,7 @@
 
 ## 当前支持状态
 
-- Pinout：mapped，标准 Pinout 图片和按文档重新接线验证待完成
+- Pinout：mapped，标准图片已补充，完整 `hello-panel` / `factory-test` 验收待完成
 - Driver：development，已接入 Driver Registry
 - PB Runtime：构建、烧录、启动和 Cloud State 拉取已验证
 - 生产可用：false
@@ -59,9 +65,9 @@ idf.py -B build-lp003 `
 
 - `profile.yaml`：结构化能力、映射与支持状态
 - `pinout.md`：参考接线和电气注意事项
+- `photos/lp003-panel.jpg`：康佳 SDC251 原始设备正面照
+- `photos/lp003-pinout.png`：PCB 元件面 J1 编号标准图
 - `validation.md`：当前可复现构建与实机证据
 - `pb-runtime.sdkconfig.defaults`：LP-003 的公开 Runtime 默认配置
 - `../../sdk/old-panel/src/drivers/lp003.c`：正式 Driver
 - `../../examples/ct1668-test/`：逆向过程、映射记录和测试代码
-
-标准面板照片与 Pinout 标注图尚未整理，不以占位图冒充实物资料。

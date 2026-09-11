@@ -7,19 +7,21 @@ CT1668 compatibility assumption：本工程暂按 TM1668 命令、RAM 和时序�
 
 | 来源 | 面板排线 |
 | --- | --- |
-| ESP32 GPIO25 | pin 1 STB（板上经过约 100Ω） |
-| ESP32 GPIO26 | pin 3 CLK |
-| ESP32 GPIO27 | pin 4 DIO |
-| ESP32 GPIO32（输入） | pin 5 IR_OUT（待动态验证） |
-| ESP32 GPIO33（输出） | pin 6 GREEN_LED_CTRL，高电平亮 |
-| ESP32 GND | pin 7 GND |
-| 独立可调电源 +3.3V | pin 8 VDD |
-| 独立可调电源 GND | pin 2 GND |
+| ESP32 GPIO32 | Pin 8 STB（板上经过约 100Ω） |
+| ESP32 GPIO33 | Pin 6 CLK |
+| ESP32 GPIO25 | Pin 5 DIO |
+| ESP32 GPIO26（输入） | Pin 4 IR_OUT（待动态验证） |
+| ESP32 GPIO27（输出） | Pin 3 GREEN_LED_CTRL，高电平亮 |
+| ESP32 GND | Pin 7 GND |
+| 独立可调电源 +3.3V | Pin 1 VDD |
+| 独立可调电源 GND | Pin 2 GND |
 
-pin 2 与 pin 7 已实测属于同一个 GND 网络。用户已连接 GPIO33→pin6、GPIO32←pin5。
-GPIO32 仅输入，无上下拉和中断，不做红外解码。红灯按用户确认作为 POWER 指示，
+Pin 2 与 Pin 7 已实测属于同一个 GND 网络。J1 编号以 PCB 元件面观察，靠近电源 /
+状态指示灯一侧为 Pin 1。当前接线为 GPIO27→Pin 3、GPIO26←Pin 4。
+GPIO26 仅输入，无上下拉和中断，不做红外解码。红灯按用户确认作为 POWER 指示，
 由面板供电，不提供软件开关。
 面板由独立电源供电，ESP32 与面板共地。无红外、Wi-Fi 或蓝牙业务代码。
+正式编号与接线图见 [LP-003 Pinout](../../profiles/LP-003/pinout.md)。
 
 ## 编译和运行
 
@@ -50,7 +52,7 @@ idf.py -p <PORT> flash monitor
 已烧录至 COM5。2026-09-07 修正接线后，芯片端采样解码出完整初始化：
 `00`、`40`、`C0` 加 14 个 `00`、`88`；用户确认诊断循环能点亮四个 8
 及中间冒号，小数点未亮。四位七段及冒号映射随后已完成实测，
-7 个物理按钮的单键读取也已实测确认。用户进一步确认绿灯由 pin6 高电平控制，
+7 个物理按钮的单键读取也已实测确认。用户进一步确认绿灯由 J1 Pin 3 高电平控制，
 红灯作为常亮 POWER 指示；小数点未亮原因仍待验证，
 不代表 CT1668 与 TM1668 完全兼容。
 当前默认使用物理按键测试，保持独立 3.3V 供电和最低亮度；
@@ -79,10 +81,10 @@ MENU 已由用户确认对应 `raw[1] bit4`（0x10），按下置位、松开清
 `[BUTTON] held=0x00 raw_valid=yes`；用户随后确认七个实体按键均测试通过。
 详见 [按键接管记录](KEY_MAPPING.md)。
 
-## GPIO33 绿灯验证
+## GPIO27 绿灯控制
 
-`main/sdc251_panel.h/.c` 封装独立 GPIO：初始化时 GPIO33 输出 LOW，绿灯熄灭；
-GPIO32 只设为输入。GPIO33 采用推挽，HIGH 点亮、LOW 熄灭；GPIO 复位期间仍可能
+`main/sdc251_panel.h/.c` 封装独立 GPIO：初始化时 GPIO27 输出 LOW，绿灯熄灭；
+GPIO26 只设为输入。GPIO27 采用推挽，HIGH 点亮、LOW 熄灭；GPIO 复位期间仍可能
 因面板已有电路而微亮。CT1668 的最低亮度只用于数码管，不调节独立绿灯。
 
 当前 `ENABLE_KEY_TEST=1`，数码管保持空白；以下为验证程序的演示按键用途：
@@ -95,7 +97,7 @@ GPIO32 只设为输入。GPIO33 采用推挽，HIGH 点亮、LOW 熄灭；GPIO �
 
 按住物理按钮不连发，UART 无需回车；同次收到多个 DOWN 时，EXIT 优先于 MENU、OK。
 其余四键仍报告原始值和命名事件。串口数字 1～7 依旧只是实验标签。
-日志 `[GREEN_LED] ON GPIO33=1 pad=1` / `OFF GPIO33=0 pad=0` 包含 ESP32 数字电平回读，
+日志 `[GREEN_LED] ON GPIO27=1 pad=1` / `OFF GPIO27=0 pad=0` 包含 ESP32 数字电平回读，
 回读不是光学点亮确认。观察绿灯响应，并确认红灯保持原有常亮状态。
 
 可复用 API：`sdc251_panel_init()`、`sdc251_green_led_set(bool)`、
@@ -104,12 +106,16 @@ get 返回上次成功写入的命令状态；单调用者使用，不在 ISR �
 绿灯驱动不写 CT1668 RAM。此前未烧录的 a/b/c 路径诊断已退出当前程序，
 历史测量过程保留于 [状态 LED 接管记录](LED_MAPPING.md)。
 
-本次 GPIO33 版本已用指定 ESP-IDF 6.0.2 完成无警告构建，应用 169216 字节；
+旧接线 GPIO33 版本曾用指定 ESP-IDF 6.0.2 完成无警告构建，应用 169216 字节；
 已通过 IDF 环境中的 esptool 烧录 COM5，写入哈希校验通过。
 串口实机测试 OFF→ON→toggle OFF→toggle ON→OFF 全部通过，GPIO33 pad 回读均一致，
 七键空闲读数仍为全零。测试结束已设为 OFF 并释放串口。
 新固件的物理按键与绿灯可见联动仍需用户现场观察；GPIO 回读不代替光学观察。
 日志：`build/green-led-build.log`、`build/green-led-flash.log`、`build/green-led-runtime.log`。
+
+2026-09-10，正式 LP-003 Driver 使用本页顶部的新映射重新构建并烧录至 COM4。
+用户确认数码管稳定显示 `0000`、GPIO27 绿灯常亮；一次受控约 1 秒 KEY_3 / OK
+按压只产生一个 `primary` Event，提交后队列回到 0 pending。
 
 ## 可选手动扫描模式
 

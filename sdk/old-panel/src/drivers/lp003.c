@@ -14,12 +14,12 @@
 
 static const char *TAG = "[LP003]";
 
-/* Konka SDC251 wiring established by the ct1668-test fixture. */
-#define LP003_PIN_STB GPIO_NUM_25
-#define LP003_PIN_CLK GPIO_NUM_26
-#define LP003_PIN_DIO GPIO_NUM_27
-#define LP003_PIN_IR GPIO_NUM_32
-#define LP003_PIN_GREEN_LED GPIO_NUM_33
+/* Konka SDC251 J1 wiring used by the LP-003 profile. */
+#define LP003_PIN_STB GPIO_NUM_32
+#define LP003_PIN_CLK GPIO_NUM_33
+#define LP003_PIN_DIO GPIO_NUM_25
+#define LP003_PIN_IR GPIO_NUM_26
+#define LP003_PIN_GREEN_LED GPIO_NUM_27
 
 #define LP003_EDGE_DELAY_US 5U
 #define LP003_RAM_SIZE 14U

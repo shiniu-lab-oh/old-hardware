@@ -10,9 +10,9 @@ extern "C" {
 
 /* CT1668 compatibility assumption: TM1668 commands/timing; display/key subsets
  * tested on this panel, full compatibility and electrical specs unverified. */
-#define CT1668_GPIO_STB          GPIO_NUM_25
-#define CT1668_GPIO_CLK          GPIO_NUM_26
-#define CT1668_GPIO_DIO          GPIO_NUM_27
+#define CT1668_GPIO_STB          GPIO_NUM_32
+#define CT1668_GPIO_CLK          GPIO_NUM_33
+#define CT1668_GPIO_DIO          GPIO_NUM_25
 #define CT1668_EDGE_DELAY_US     5U
 #define CT1668_RAM_SIZE          14U
 #define CT1668_KEY_BYTES         5U

@@ -10,8 +10,8 @@ extern "C" {
 
 /* User-confirmed board wiring; these signals are separate from CT1668.
  * Panel remains powered from the independent 3.3V bench supply. */
-#define SDC251_GPIO_GREEN_LED GPIO_NUM_33 /* Panel pin6, HIGH = ON */
-#define SDC251_GPIO_IR_IN     GPIO_NUM_32 /* Panel pin5, input only for now */
+#define SDC251_GPIO_GREEN_LED GPIO_NUM_27 /* J1 Pin 3, HIGH = ON */
+#define SDC251_GPIO_IR_IN     GPIO_NUM_26 /* J1 Pin 4, input only for now */
 
 /* Single caller, no ISR use. Sets green OFF and reserves IR as a floating
  * input (no interrupt, pull-up, pull-down or decoding). Red POWER LED has
