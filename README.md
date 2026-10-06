@@ -21,6 +21,7 @@
 - `examples/`：最小示例、工厂测试与逆向工具
 - [OH-VFD-FIL Prototype 0](examples/oh-vfd-fil-prototype-0/README.md)：ESP32 MCPWM + DRV8837 的 20 kHz 双极性灯丝供电测试
 - [BOE VFM041SSBR1-S1 VFD Support Package v0.1](examples/pt6312-test/README.md)：PT6312 驱动、实测 Profile、数字 Renderer、Mapper 与 SELF_TEST（Renderer 待实机验收）
+- [PT6319LQ Interactive Mapper v0.1](examples/pt6319-first-light/README.md)：基于已点亮的 First Light，保留 ALL ON，增加 96 状态单步、GOTO 与自动扫描
 - `tools/pb-conformance-server/`：PB App Protocol 的公开 Mock Cloud 与验收工具
 
 PB Runtime 是通用运行时，不包含 ONE 等具体 App 的业务逻辑。架构边界与推进顺序见
